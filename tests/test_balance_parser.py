@@ -160,3 +160,127 @@ class ParsePageTests(SimpleTestCase):
     def test_page_number_is_carried_onto_every_row(self):
         for row in _parse(ENTRY_LINES).rows:
             self.assertEqual(row.page_number, 2)
+
+
+class RowSeparationTests(SimpleTestCase):
+    """Entries written close together must not chain into one row.
+
+    Grouping measures each box against the group's running centre, so every box
+    added drags that centre down and the next entry stays within reach. On
+    page 1 of the sample the entries are 60 px apart under a 45 px tolerance,
+    and with nothing to stop it they collapse into one row. What stops it is
+    that one entry cannot put two values in the same column.
+    """
+
+    def _tight_rows(self):
+        lines = []
+        for index, (brought, issued, balance) in enumerate(
+            [("450", "40", "410"), ("410", "20", "390"), ("390", "10", "380")]
+        ):
+            y = 700 + index * 60
+            lines.append(_Line(brought, _center(7), y, height=50))
+            lines.append(_Line(issued, _center(9), y + 4, height=50))
+            lines.append(_Line(balance, _center(10), y + 2, height=50))
+        return lines
+
+    def test_three_tight_entries_stay_three_rows(self):
+        rows = _parse(self._tight_rows()).rows
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(
+            [row.quantities[form_layout.BALANCE] for row in rows], [410, 390, 380]
+        )
+
+    def test_a_numeral_split_into_two_boxes_is_one_value(self):
+        # "45" and "0" side by side on one baseline are 450, not two entries.
+        lines = [
+            _Line("45", _center(7), 700, width=60),
+            _Line("0", _center(7) + 70, 700, width=30),
+            _Line("40", _center(9), 700),
+            _Line("410", _center(10), 700),
+        ]
+        rows = _parse(lines).rows
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].quantities[form_layout.BALANCE_BROUGHT], 450)
+
+
+class AcceptanceTests(SimpleTestCase):
+    def test_an_entry_with_only_its_figures_is_kept(self):
+        # Neither date nor name could be read; the quantities alone make it an
+        # entry. Judging by the identifying text instead threw away five of the
+        # eleven rows on page 1 of the sample.
+        lines = [
+            _Line("410", _center(7), 900),
+            _Line("20", _center(9), 900),
+            _Line("390", _center(10), 900),
+        ]
+        rows = _parse(lines).rows
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].quantities[form_layout.BALANCE], 390)
+
+    def test_a_single_figure_is_not_an_entry(self):
+        # The "รวม" total line: one closing figure, dashes beside it.
+        self.assertEqual(_parse([_Line("390", _center(10), 1180)]).rows, [])
+
+    def test_printed_column_titles_do_not_become_an_entry(self):
+        # The Thai headings read as Latin noise and pick up a stray digit, so
+        # only their position above the header rule keeps them out.
+        header = [
+            _Line("gubuecisuen", _center(1), TOP + 20),
+            _Line("Mausinn c (nuad.", _center(7), TOP + 30),
+            _Line("1", _center(9), TOP + 40),
+        ]
+        self.assertEqual(len(_parse(header + ENTRY_LINES).rows), 2)
+
+
+class CorrectedCellTests(SimpleTestCase):
+    """A figure struck through and rewritten is two figures, not one number.
+
+    Joining them produced values that were never written - 390410 from a "390"
+    corrected to "410", 11000 from a stricken "1,000" - and those were reported
+    as if read off the page.
+    """
+
+    def test_two_figures_in_one_cell_are_not_concatenated(self):
+        # The recogniser returns both in a single box: "39 o 410" for a 390
+        # struck through and corrected to 410.
+        lines = [
+            _Line("39 o 410", _center(7), 700),
+            _Line("20", _center(9), 700),
+        ]
+        row = _parse(lines).rows[0]
+        self.assertIsNone(row.quantities[form_layout.BALANCE_BROUGHT])
+        self.assertTrue(
+            any("corrected by hand" in note for note in row.review_notes),
+            row.review_notes,
+        )
+
+    def test_a_numeral_boxed_in_pieces_is_still_one_number(self):
+        lines = [
+            _Line("45", _center(7), 700, width=60),
+            _Line("0", _center(7) + 70, 700, width=30),
+            _Line("40", _center(9), 700),
+            _Line("410", _center(10), 700),
+        ]
+        row = _parse(lines).rows[0]
+        self.assertEqual(row.quantities[form_layout.BALANCE_BROUGHT], 450)
+
+    def test_the_reconciliation_can_still_recover_the_cell(self):
+        # The corrected cell is a gap, so the arithmetic may fill it back in.
+        lines = [
+            _Line("450", _center(7), 700),
+            _Line("40", _center(9), 700),
+            _Line("390 410", _center(10), 700),
+        ]
+        row = _parse(lines).rows[0]
+        self.assertEqual(row.quantities[form_layout.BALANCE], 410)
+
+
+class NameTests(SimpleTestCase):
+    def test_a_wrapped_fragment_is_not_a_drug_name(self):
+        # "1 MX" is the tail of a wrapped "1 mg" that drifted down into the
+        # total line; counting alphanumerics let it keep that line as an entry.
+        self.assertFalse(balance_parser._looks_like_a_name("1 MX"))
+
+    def test_a_misread_drug_name_still_counts(self):
+        for name in ("Lorazepam", "Loraztpqm", "Lorsztpam L"):
+            self.assertTrue(balance_parser._looks_like_a_name(name), name)

@@ -31,54 +31,99 @@ curl -X POST http://localhost:3004/api/v1/balance/documents \
 
 ### 201 Created
 
+`entries` คือ **16 คอลัมน์ตาม `ตัวอย่าง Colume.xlsx`** ชื่อคีย์และลำดับตรงกับ
+หัวคอลัมน์ในไฟล์ Excel ทุกตัวอักษร (ชีต `Output` สร้างจากนิยามเดียวกัน
+จึงไม่มีทางหลุดจากกัน)
+
 ```json
 {
-  "document_id": "8083566b-1999-4891-8326-5b50d7a6b1bb",
+  "document_id": "8085abe0-b506-4816-9d97-83ad448abeaa",
   "file_name": "ledger.pdf",
-  "file_hash": "…sha256…",
   "page_count": 8,
   "status": "COMPLETED",
   "ocr_language": "latin",
-  "entry_count": 35,
-  "review_count": 32,
-  "processing_ms": 52108,
+  "entry_count": 46,
+  "review_count": 46,
+  "processing_ms": 163157,
   "page_summary": [
-    {"page": 1, "form": "ร.ว.จ ๗/๔", "rows": 6, "skew": 0.76,
+    {"page": 1, "form": "ร.ว.จ ๗/๔", "rows": 12, "skew": 0.76,
      "confidence": 0.7814, "error": ""}
   ],
   "entries": [
     {
-      "page_number": 1, "row_index": 5, "form_code": "ร.ว.จ ๗/๔",
+      "เลขที่คำขอซื้อ": "",
+      "ProductGenericName": "Lorazepam 1 mg",
+      "ProductTradeName": "Lorazep",
+      "ประเภทวัตุถเสพติด": "วัตถุออกฤทธิ์ในประเภท 3 หรือประเภท 4",
+      "เลขที่ใบอนุญาต": "",
+      "จำนวนที่ขอซื้อ": null,
+      "จำนวนที่อนุมัติ": null,
+      "ยอดเงินที่อนุมัติ": null,
+      "วันที่สร้าง": "2026-03-16",
+      "วันที่อนุมัติ": null,
+      "ชื่อสถานพยาบาล": "",
+      "ที่ตั้ง": "",
+      "จังหวัด": "",
+      "ผู้ดำเนินกิจการ": "",
+      "เลขที่ใบแจ้งหนี้/ใบเสร็จ": "",
+      "วันที่ออกใบแจ้งหนี้/ใบเสร็จ": null
+    }
+  ],
+  "ledger": [
+    {
+      "page_number": 1, "row_index": 6, "form_code": "ร.ว.จ ๗/๔",
       "entry_date": "2026-03-16",
       "generic_name": "Lorazepam 1 mg", "trade_name": "",
-      "batch_no": "T25275", "manufacturer": "Asian Pharm",
-      "received_from": "", "issued_to": "gduis& Lanu",
-      "recipient_id": "", "prescription_no": "", "unit": "i&6", "remark": "",
+      "batch_no": "T25275", "manufacturer": "", "received_from": "",
+      "issued_to": "gduis& Lanu", "recipient_id": "", "prescription_no": "",
+      "unit": "i&6", "remark": "",
       "balance_brought": 340, "received": null, "issued": 10, "balance": 330,
       "confidence": "0.8665",
-      "needs_review": false, "review_notes": null
+      "needs_review": true,
+      "review_notes": ["issued_to is written in Thai, which this engine cannot read"]
     }
   ]
 }
 ```
 
-### ฟิลด์ที่ผู้เรียกต้องอ่านให้ครบ
+### 16 คอลัมน์: อะไรมีค่า อะไรว่าง
 
-| ฟิลด์ | ความหมาย |
+ฟอร์มพวกนี้ให้ข้อมูลได้ **4 จาก 16 ช่อง**:
+
+| คอลัมน์ | มาจาก |
+| --- | --- |
+| `ProductGenericName` | ชื่อและความแรงของวัตถุออกฤทธิ์ |
+| `ProductTradeName` | ชื่อการค้า (มีเฉพาะ ร.ค.-๔ และ บ.ว.จ ๗/๔-ขพ) |
+| `ประเภทวัตุถเสพติด` | หัวเรื่องของฟอร์ม เป็นค่าคงที่ |
+| `วันที่สร้าง` | วัน เดือน ปี ของรายการ |
+
+อีก 12 ช่องเป็นข้อมูลของ**ใบคำขอซื้อ** ซึ่งไม่มีอยู่ในบัญชี/รายงานชุดนี้
+จึงคืนค่าว่าง (`""` สำหรับข้อความ, `null` สำหรับตัวเลขและวันที่)
+ไม่ใช่เพราะการสกัดพลาด
+
+### `ledger` — ข้อมูลที่ 16 คอลัมน์ไม่มีที่ให้ใส่
+
+จำนวนแถวเท่ากับ `entries` และเรียงตรงกันทีละแถว ในนี้มียอดยกมา/รับ/จ่าย/คงเหลือ
+เลขที่รุ่นผลิต ผู้รับยา เลขบัตรประชาชน และที่สำคัญที่สุดคือ `needs_review`
+กับ `review_notes`
+
+**ผู้เรียกที่ต้องการแค่รูปแบบที่ตกลงกันไว้ ใช้ `entries` อย่างเดียวได้เลย
+ไม่ต้องสนใจ `ledger`** แต่ถ้าจะตัดสินใจอะไรจากตัวเลข ต้องอ่าน `ledger` ด้วย
+
+| ฟิลด์ใน `ledger` | ความหมาย |
 | --- | --- |
 | `needs_review` | **`true` = อย่านำไปใช้โดยไม่ให้คนดูก่อน** |
 | `review_notes` | เหตุผลเป็นข้อ ๆ ว่าทำไมแถวนี้ไม่น่าเชื่อถือ |
 | `confidence` | ความมั่นใจเฉลี่ยของกล่องข้อความในแถวนั้น |
-| `page_summary[].error` | หน้าที่อ่านไม่ได้เลย จะมีเหตุผลอยู่ตรงนี้ |
-| `ocr_language` | engine ที่ใช้ — เป็นตัวบอกว่าช่องไทยเชื่อได้ไหม |
+| `balance_brought` / `received` / `issued` / `balance` | ยอดยกมา / รับ / จ่าย / คงเหลือ |
 
-`received: null` **ไม่ใช่** "อ่านไม่ได้" แต่คือขีด `—` บนฟอร์ม
-ซึ่งหมายถึงไม่มีการเคลื่อนไหว ถ้าอ่านไม่ได้จริงจะมี note กำกับเสมอ
+`received: null` **ไม่ใช่** "อ่านไม่ได้" แต่คือขีด `—` บนฟอร์ม ซึ่งหมายถึง
+ไม่มีการเคลื่อนไหว ถ้าอ่านไม่ได้จริงจะมี note กำกับเสมอ
 
-> **คาดหวังให้ถูก:** บนเอกสารตัวอย่าง `review_count == entry_count`
-> คือทุกแถวถูกเตือน ผู้เรียกจึงไม่ควรเขียนโค้ดแบบ "ถ้า needs_review ให้ข้าม"
-> เพราะจะได้ศูนย์แถว ให้ใช้ `review_notes` เลือกดูเฉพาะเรื่องที่สนใจแทน เช่น
-> ถ้าสนใจแค่ตัวเลข ก็มองข้าม note ที่ขึ้นต้นด้วย `issued_to is written in Thai`
+> **คาดหวังให้ถูก:** บนเอกสารตัวอย่าง `review_count == entry_count` คือทุกแถว
+> ถูกเตือน ผู้เรียกจึงไม่ควรเขียนโค้ดแบบ "ถ้า needs_review ให้ข้าม" เพราะจะได้
+> ศูนย์แถว ให้ใช้ `review_notes` เลือกดูเฉพาะเรื่องที่สนใจแทน เช่นถ้าสนใจแค่
+> ตัวเลข ก็มองข้าม note ที่ขึ้นต้นด้วย `issued_to is written in Thai`
 
 ### 400 Bad Request
 ไม่ได้แนบไฟล์ หรือไฟล์ไม่ใช่ PDF

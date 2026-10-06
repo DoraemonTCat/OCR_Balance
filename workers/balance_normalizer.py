@@ -21,7 +21,11 @@ _DIGIT_CONFUSIONS = str.maketrans(
         "O": "0", "o": "0", "D": "0", "Q": "0",
         "l": "1", "I": "1", "i": "1", "|": "1", "!": "1",
         "z": "2", "Z": "2",
-        "$": "8", "B": "8",
+        # "%" is not a guess about an ambiguous shape the way "S" for 5 is: a
+        # percent sign cannot occur inside a quantity on these forms at all, so
+        # wherever the recogniser reports one it has misread a handwritten 8,
+        # which is what it does across the sample ("2%0", "9b%", "95%").
+        "$": "8", "B": "8", "%": "8",
         "S": "5", "s": "5",
         "G": "6", "b": "6",
         "T": "7",
@@ -59,6 +63,42 @@ def clean_quantity(text: str) -> tuple[int | None, bool]:
         # Clean only if nothing had to be substituted; otherwise it is a guess.
         return int(translated), compact.isdigit()
     return None, False
+
+
+def normalise_digits(text: str) -> str:
+    """Replace the letters the recogniser returns for handwritten digits.
+
+    Exposed because the date reconstruction in ``balance_parser`` has to read
+    the same digits out of a cell that this module failed to parse as a date.
+    """
+    return (text or "").translate(_DIGIT_CONFUSIONS)
+
+
+#: A quantity cell holding two figures this long, with space between them, is a
+#: line the writer corrected: the old figure struck through and the new one
+#: beside it. One of the two is a stray digit the recogniser boxed apart from
+#: its numeral ("45 0" is 450), so both groups have to be substantial.
+_FIGURE_DIGITS = 2
+
+
+def holds_two_figures(text: str) -> bool:
+    """True when a quantity cell holds two separate numbers rather than one.
+
+    The writers correct a line by striking the old figure through and writing
+    the new one beside it, and the recogniser returns both in one cell -
+    "39 o 410" for a 390 corrected to 410. Stripping the spaces turns that into
+    390410, a number nobody wrote, and it went out as if it had been read off
+    the page.
+
+    What it must not catch is a single numeral the recogniser boxed in pieces,
+    which is common: "45 0" is 450 and "3 80" is 380. Those leave only one group
+    of two digits or more; a corrected cell leaves two.
+    """
+    groups = [
+        re.sub(r"\D", "", part)
+        for part in re.split(r"\s+", normalise_digits(text or "").strip())
+    ]
+    return sum(1 for group in groups if len(group) >= _FIGURE_DIGITS) >= 2
 
 
 def clean_date(text: str) -> tuple[dt.date | None, bool]:

@@ -115,6 +115,10 @@ def extract(path: Path, *, dpi: int | None = None) -> DocumentResult:
     finally:
         document.close()
 
+    # The month these returns cover is settled across the whole document: a
+    # single page can contain no cleanly read date at all.
+    balance_parser.settle_dates(result.rows)
+
     result.processing_ms = int((time.monotonic() - started) * 1000)
     log.info(
         "document extracted",

@@ -123,40 +123,59 @@ def build(rows, pages) -> bytes:
     return buffer.getvalue()
 
 
+#: 1-based positions of the four columns the ledgers can actually fill. The
+#: rest belong to a purchase-approval record and stay empty.
+SOURCED_COLUMNS = (2, 3, 4, 9)
+
+
+def output_values(row) -> list:
+    """The sixteen agreed columns for one entry, in order.
+
+    The single definition of that mapping. The workbook's first sheet and the
+    API's JSON are both built from it, so the two cannot drift apart - which
+    they would, being written in different modules against the same agreed list.
+    """
+    return [
+        "",                              # เลขที่คำขอซื้อ
+        _value(row, "generic_name"),
+        _value(row, "trade_name"),
+        SUBSTANCE_TYPE,
+        "",                              # เลขที่ใบอนุญาต
+        None,                            # จำนวนที่ขอซื้อ
+        None,                            # จำนวนที่อนุมัติ
+        None,                            # ยอดเงินที่อนุมัติ
+        _date(row),
+        None,                            # วันที่อนุมัติ
+        "",                              # ชื่อสถานพยาบาล
+        "",                              # ที่ตั้ง
+        "",                              # จังหวัด
+        "",                              # ผู้ดำเนินกิจการ
+        "",                              # เลขที่ใบแจ้งหนี้/ใบเสร็จ
+        None,                            # วันที่ออกใบแจ้งหนี้/ใบเสร็จ
+    ]
+
+
+def output_row(row) -> dict:
+    """The sixteen agreed columns for one entry, keyed by their header."""
+    return {
+        title: value
+        for (title, _), value in zip(OUTPUT_COLUMNS, output_values(row))
+    }
+
+
 def _write_output(sheet: Worksheet, rows) -> None:
     _header(sheet, OUTPUT_COLUMNS)
     # The twelve columns with no source are shaded so a reader can see at a
     # glance that they are empty by nature, not because extraction missed them.
-    sourced = {2, 3, 4, 9}
-
     for row in rows:
-        sheet.append(
-            [
-                "",                                   # เลขที่คำขอซื้อ
-                _value(row, "generic_name"),
-                _value(row, "trade_name"),
-                SUBSTANCE_TYPE,
-                "",                                   # เลขที่ใบอนุญาต
-                None,                                 # จำนวนที่ขอซื้อ
-                None,                                 # จำนวนที่อนุมัติ
-                None,                                 # ยอดเงินที่อนุมัติ
-                _date(row),
-                None,                                 # วันที่อนุมัติ
-                "",                                   # ชื่อสถานพยาบาล
-                "",                                   # ที่ตั้ง
-                "",                                   # จังหวัด
-                "",                                   # ผู้ดำเนินกิจการ
-                "",                                   # เลขที่ใบแจ้งหนี้/ใบเสร็จ
-                None,                                 # วันที่ออกใบแจ้งหนี้/ใบเสร็จ
-            ]
-        )
+        sheet.append(output_values(row))
         written = sheet[sheet.max_row]
         written[8].number_format = _DATE_FORMAT
         for index, cell in enumerate(written, start=1):
-            if index not in sourced:
+            if index not in SOURCED_COLUMNS:
                 cell.fill = _EMPTY_FILL
         if _value(row, "needs_review"):
-            for index in sourced:
+            for index in SOURCED_COLUMNS:
                 written[index - 1].fill = _REVIEW_FILL
 
     _finish(sheet, OUTPUT_COLUMNS)

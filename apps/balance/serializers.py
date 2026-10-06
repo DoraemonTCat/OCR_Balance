@@ -4,6 +4,7 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from apps.balance.models import BalanceDocument, BalanceEntry
+from workers import balance_export
 
 
 class BalanceUploadSerializer(serializers.Serializer):
@@ -16,7 +17,15 @@ class BalanceUploadSerializer(serializers.Serializer):
         return value
 
 
-class BalanceEntrySerializer(serializers.ModelSerializer):
+class LedgerEntrySerializer(serializers.ModelSerializer):
+    """One ledger line as the form sets it out.
+
+    This is what the document actually says, including the ยอดยกมา / รับ /
+    จ่าย / คงเหลือ figures and the review verdict. ``entries`` carries the
+    sixteen agreed columns instead; this is the detail behind them, matching the
+    workbook's second sheet.
+    """
+
     class Meta:
         model = BalanceEntry
         fields = (
@@ -80,9 +89,24 @@ class BalanceDocumentSerializer(serializers.ModelSerializer):
 
 
 class BalanceResultSerializer(BalanceDocumentSerializer):
-    """The document with every row it produced."""
+    """The document with every row it produced.
 
-    entries = BalanceEntrySerializer(many=True, read_only=True)
+    ``entries`` is the agreed output: the sixteen columns of
+    ``ตัวอย่าง Colume.xlsx``, keyed by their headers and in their order, the
+    same values the workbook's first sheet carries. Only four of them exist on
+    these ledgers; the rest belong to a purchase-approval record and come back
+    empty - see ``workers/balance_export.py``.
+
+    ``ledger`` is the same rows as the document states them, with the figures
+    and the review verdict that the sixteen columns have nowhere to put. A
+    caller that only wants the agreed shape can ignore it.
+    """
+
+    entries = serializers.SerializerMethodField()
+    ledger = LedgerEntrySerializer(source="entries", many=True, read_only=True)
 
     class Meta(BalanceDocumentSerializer.Meta):
-        fields = BalanceDocumentSerializer.Meta.fields + ("entries",)
+        fields = BalanceDocumentSerializer.Meta.fields + ("entries", "ledger")
+
+    def get_entries(self, document: BalanceDocument) -> list[dict]:
+        return [balance_export.output_row(entry) for entry in document.entries.all()]

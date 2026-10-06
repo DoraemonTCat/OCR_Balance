@@ -166,10 +166,12 @@ OCR = {
     # rather than reported as read. See docs/OCR_THAI.md.
     "LANGUAGE": env("OCR_LANGUAGE", "latin"),
     "USE_GPU": env_bool("OCR_USE_GPU", False),
-    # Pages are rendered at this dpi before the table rules are detected. The
-    # tolerances in grid_detector are calibrated here; changing it means
-    # re-checking them.
-    "RENDER_DPI": env_int("OCR_RENDER_DPI", 200),
+    # Pages are rendered at this dpi before the table rules are detected.
+    # 300 rather than 200: at 200 the recogniser misses the quantity cells on
+    # the fainter pages altogether, and a page with no quantities yields no
+    # rows at all - on the sample it cost 4 of the 45 entries, 3 of them from
+    # one page. The cost is roughly half again as long per page.
+    "RENDER_DPI": env_int("OCR_RENDER_DPI", 300),
 }
 
 BULK_INSERT_BATCH_SIZE = env_int("BULK_INSERT_BATCH_SIZE", 1000)

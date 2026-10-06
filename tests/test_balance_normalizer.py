@@ -84,3 +84,21 @@ class ReadabilityTests(SimpleTestCase):
         # plausible letters, indistinguishable from a name that was read. This
         # is why Thai cells are flagged by column, not by inspecting the text.
         self.assertFalse(norm.looks_unreadable("t@on SunScQ"))
+
+
+class CorrectedCellTests(SimpleTestCase):
+    """A figure struck through and rewritten is two figures, not one number."""
+
+    def test_detects_a_corrected_cell(self):
+        # "39 o 410": a 390 struck through, 410 written beside it. Stripping the
+        # spaces made 390410, a number nobody wrote.
+        self.assertTrue(norm.holds_two_figures("39 o 410"))
+        self.assertTrue(norm.holds_two_figures("390 410"))
+
+    def test_a_numeral_boxed_in_pieces_is_one_figure(self):
+        for text in ("45 0", "3 80", "9 9 6", "1,000", "390"):
+            self.assertFalse(norm.holds_two_figures(text), text)
+
+    def test_an_empty_cell_holds_nothing(self):
+        self.assertFalse(norm.holds_two_figures(""))
+        self.assertFalse(norm.holds_two_figures("-"))

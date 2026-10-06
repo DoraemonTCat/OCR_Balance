@@ -7,15 +7,17 @@ not about OCR, which ``test_balance_parser`` covers without an engine.
 from __future__ import annotations
 
 import datetime as dt
+import io
 from unittest import mock
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client
+from openpyxl import load_workbook
 from rest_framework import status
 
 from apps.balance.models import BalanceDocument, DocumentStatus
-from workers import form_layout
+from workers import balance_export, form_layout
 from workers.balance_parser import LedgerRow
 from workers.balance_pipeline import DocumentResult, PageOutcome
 
@@ -81,7 +83,82 @@ class TestSubmit:
         assert body["status"] == DocumentStatus.COMPLETED
         assert body["entry_count"] == 2
         assert len(body["entries"]) == 2
-        assert body["entries"][0]["generic_name"] == "Lorazepam 1 mg"
+        assert body["entries"][0]["ProductGenericName"] == "Lorazepam 1 mg"
+
+
+class TestAgreedColumns:
+    """``entries`` is the sixteen columns of ตัวอย่าง Colume.xlsx, in order.
+
+    Asserted literally rather than against the module that produces them, so a
+    change to the agreed shape has to be made deliberately in two places.
+    """
+
+    EXPECTED = [
+        "เลขที่คำขอซื้อ",
+        "ProductGenericName",
+        "ProductTradeName",
+        "ประเภทวัตุถเสพติด",
+        "เลขที่ใบอนุญาต",
+        "จำนวนที่ขอซื้อ",
+        "จำนวนที่อนุมัติ",
+        "ยอดเงินที่อนุมัติ",
+        "วันที่สร้าง",
+        "วันที่อนุมัติ",
+        "ชื่อสถานพยาบาล",
+        "ที่ตั้ง",
+        "จังหวัด",
+        "ผู้ดำเนินกิจการ",
+        "เลขที่ใบแจ้งหนี้/ใบเสร็จ",
+        "วันที่ออกใบแจ้งหนี้/ใบเสร็จ",
+    ]
+
+    def test_every_entry_has_exactly_those_keys_in_that_order(self, client):
+        for entry in _upload(client).json()["entries"]:
+            assert list(entry) == self.EXPECTED
+
+    def test_fills_the_four_columns_the_forms_supply(self, client):
+        entry = _upload(client).json()["entries"][0]
+        assert entry["ProductGenericName"] == "Lorazepam 1 mg"
+        assert entry["ProductTradeName"] == "Lorazep"
+        assert entry["ประเภทวัตุถเสพติด"] == balance_export.SUBSTANCE_TYPE
+        assert entry["วันที่สร้าง"] == "2026-03-01"
+
+    def test_leaves_the_purchase_approval_columns_empty(self, client):
+        entry = _upload(client).json()["entries"][0]
+        empty = set(self.EXPECTED) - {
+            "ProductGenericName",
+            "ProductTradeName",
+            "ประเภทวัตุถเสพติด",
+            "วันที่สร้าง",
+        }
+        for column in empty:
+            assert entry[column] in ("", None), column
+
+    def test_the_api_and_the_workbook_agree(self, client):
+        # Both are built from workers.balance_export, so they cannot drift.
+        document_id = _upload(client).json()["document_id"]
+        workbook = load_workbook(
+            io.BytesIO(client.get(f"{URL}/{document_id}/export.xlsx").content)
+        )
+        header = [c.value for c in next(workbook["Output"].iter_rows(max_row=1))]
+        assert header == self.EXPECTED
+
+
+class TestLedgerDetail:
+    """``ledger`` keeps what the sixteen columns have nowhere to put."""
+
+    def test_carries_the_figures_and_the_verdict(self, client):
+        row = _upload(client).json()["ledger"][0]
+        assert row["balance_brought"] == 450
+        assert row["received"] is None  # a dash on the form
+        assert row["issued"] == 40
+        assert row["balance"] == 410
+        assert row["batch_no"] == "T25275"
+        assert "needs_review" in row and "review_notes" in row
+
+    def test_lines_up_one_for_one_with_entries(self, client):
+        body = _upload(client).json()
+        assert len(body["ledger"]) == len(body["entries"])
 
     def test_records_the_engine_language_on_the_document(self, client):
         # Which fields are trustworthy depends on it, so it is part of the answer.

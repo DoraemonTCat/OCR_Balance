@@ -84,6 +84,26 @@ class Grid:
     def bottom(self) -> float:
         return self.y_rules[-1]
 
+    @property
+    def header_bottom(self) -> float:
+        """y below which the entries start; the column titles are above it.
+
+        Taken as the lowest rule still in the top third of the table. The
+        horizontal rules cannot be trusted to be complete - see the module
+        docstring - so this is used only to discard what is *entirely* above it,
+        never to decide where a row begins. On the forms here the header is one
+        or two ruled bands, and both land in that third.
+
+        Without it the printed column titles become an entry: they sit in the
+        quantity columns, and read by a Latin model the Thai reads as plausible
+        letters, so nothing about the text itself gives them away.
+        """
+        if len(self.y_rules) < 3:
+            return self.top
+        limit = self.top + (self.bottom - self.top) * _HEADER_BAND_SHARE
+        below = [value for value in self.y_rules[1:-1] if value <= limit]
+        return below[-1] if below else self.top
+
     def inside(self, y: float) -> bool:
         """True when ``y`` falls between the table's top and bottom rules.
 
@@ -98,6 +118,12 @@ class Grid:
         return [
             self.x_rules[i + 1] - self.x_rules[i] for i in range(self.columns)
         ]
+
+
+#: Fraction of the table's height within which the header's ruled band(s) sit.
+#: The forms here use one or two bands; a third of the table clears both and
+#: still stays well above the first entry.
+_HEADER_BAND_SHARE = 0.35
 
 
 def _require_cv2():
@@ -291,8 +317,15 @@ def _drop_page_border(rules: list[float], *, extent: int) -> list[float]:
 #: box height belong to the same written line.
 _ROW_TOLERANCE = 0.6
 
+#: Two boxes in the same column are the same written value - one numeral the
+#: recogniser boxed in pieces - only if their centres are this close, again as a
+#: multiple of the median height. Further apart, they are two entries.
+_SAME_VALUE_TOLERANCE = 0.35
 
-def cluster_by_y(boxes, tolerance_ratio: float = _ROW_TOLERANCE) -> list[list]:
+
+def cluster_by_y(
+    boxes, tolerance_ratio: float = _ROW_TOLERANCE, column_of=None
+) -> list[list]:
     """Group boxes that sit on the same written line, top to bottom.
 
     ``boxes`` is any sequence of objects with a ``bbox`` of (x0, y0, x1, y1).
@@ -300,22 +333,34 @@ def cluster_by_y(boxes, tolerance_ratio: float = _ROW_TOLERANCE) -> list[list]:
     writer's hand and to the render dpi instead of assuming a pixel gap.
 
     The caller decides *which* boxes to cluster. ``balance_parser`` passes only
-    the dates and quantities: the data area carries no horizontal rules, so a
-    row is defined by the compact cells that occur once per entry, never by the
+    the quantities: the data area carries no horizontal rules, so a row is
+    defined by the compact cells that occur once per entry, never by the
     drug-name cell, which the writer wraps over two or three lines.
+
+    ``column_of`` maps a box to the column it sits in. Given one, a group may
+    hold at most one box per column, which is what stops a run of tightly
+    written entries from chaining into a single group: the tolerance is measured
+    against the group's *running* centre, so each new box drags the centre down
+    and the next box still falls within reach, and three entries 60 px apart
+    merge under a 45 px tolerance. A repeated column cannot happen inside one
+    entry - a ledger line has one ยอดยกมา, one รับ, one จ่าย, one คงเหลือ - so
+    seeing one is proof the group has run past the end of its row.
     """
     ordered = sorted(boxes, key=_center_y)
     if not ordered:
         return []
 
     heights = sorted(box.bbox[3] - box.bbox[1] for box in ordered)
-    tolerance = (heights[len(heights) // 2] or 1.0) * tolerance_ratio
+    median_height = heights[len(heights) // 2] or 1.0
+    tolerance = median_height * tolerance_ratio
+    same_value = median_height * _SAME_VALUE_TOLERANCE
 
     groups: list[list] = [[ordered[0]]]
     for box in ordered[1:]:
         last = groups[-1]
         reference = sum(_center_y(item) for item in last) / len(last)
-        if _center_y(box) - reference <= tolerance:
+        near = _center_y(box) - reference <= tolerance
+        if near and not _occupied(last, box, column_of, same_value):
             last.append(box)
         else:
             groups.append([box])
@@ -323,6 +368,25 @@ def cluster_by_y(boxes, tolerance_ratio: float = _ROW_TOLERANCE) -> list[list]:
     for group in groups:
         group.sort(key=lambda box: box.bbox[0])
     return groups
+
+
+def _occupied(group, box, column_of, same_value: float) -> bool:
+    """True when ``box``'s column already holds a different value in ``group``.
+
+    A number the recogniser split into two boxes side by side ("45" and "0" for
+    450) lands in one column twice at the same height; that is one value, not a
+    clash, so only a box at a genuinely different height counts.
+    """
+    if column_of is None:
+        return False
+    column = column_of(box)
+    if column is None:
+        return False
+    center = _center_y(box)
+    return any(
+        column_of(other) == column and abs(_center_y(other) - center) > same_value
+        for other in group
+    )
 
 
 def _center_y(box) -> float:
