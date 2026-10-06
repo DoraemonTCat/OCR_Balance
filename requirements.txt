@@ -1,0 +1,25 @@
+# API
+Django==5.2.6
+djangorestframework==3.15.2
+gunicorn==23.0.0
+python-dotenv==1.0.1
+
+# PostgreSQL. The service only stores what it reads; point DB_* at any server.
+psycopg[binary]==3.2.3
+psycopg-pool==3.2.4
+
+# Document processing
+PyMuPDF==1.24.14
+paddleocr==2.9.1
+paddlepaddle==2.6.2
+# paddleocr imports pkg_resources at module load. Python 3.12 no longer puts
+# setuptools in a new venv, so without this "import paddleocr" fails with
+# ModuleNotFoundError: No module named 'setuptools'.
+setuptools>=70.0.0
+# Grid detection, deskew, and the OCR engine's preprocessing.
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+Pillow==11.0.0
+
+# Excel output
+openpyxl==3.1.5
