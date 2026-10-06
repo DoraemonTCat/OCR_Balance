@@ -89,15 +89,9 @@ PAGE_COLUMNS: Sequence[tuple[str, int]] = (
     ("ปัญหา", 60),
 )
 
-#: The subject of all three forms, used for ประเภทวัตุถเสพติด. It is printed on
-#: the form, not written in, so it is the one document-level value that is known
-#: without reading any Thai.
-SUBSTANCE_TYPE = "วัตถุออกฤทธิ์ในประเภท 3 หรือประเภท 4"
-
 _HEADER_FILL = PatternFill("solid", fgColor="1F3864")
 _HEADER_FONT = Font(color="FFFFFF", bold=True)
 _REVIEW_FILL = PatternFill("solid", fgColor="FFF2CC")
-_EMPTY_FILL = PatternFill("solid", fgColor="F2F2F2")
 _DATE_FORMAT = "yyyy-mm-dd"
 
 

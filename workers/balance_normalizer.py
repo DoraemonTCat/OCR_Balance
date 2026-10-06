@@ -194,21 +194,51 @@ def clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").replace(*_SARA_AM).strip())
 
 
-#: Latin letters, digits and the punctuation a drug name uses. A cell made
-#: mostly of anything else is the Thai recogniser failing, not content.
-_READABLE = re.compile(r"[A-Za-z0-9]")
+# --- Thai dates ------------------------------------------------------------
+
+#: The month abbreviations as the ประเภท ๒ forms write them. Both spellings of
+#: each are listed, with and without the full stops, because the forms use both
+#: ("3 มค 68" on one, "3 ม.ค.68" on the other).
+_THAI_MONTHS: dict[str, int] = {
+    "มค": 1, "กพ": 2, "มีค": 3, "เมย": 4, "พค": 5, "มิย": 6,
+    "กค": 7, "สค": 8, "กย": 9, "ตค": 10, "พย": 11, "ธค": 12,
+}
+
+#: A range - "3-31 ม.ค. 68" - summarises a month of dispensing on one line. It
+#: is not a date, and the agreed output carries the cell's text, so the only
+#: thing needed here is to recognise one and not force it into a day.
+_RANGE = re.compile(r"\d+\s*-\s*\d+")
 
 
-def looks_unreadable(text: str) -> bool:
-    """True when a cell is mostly symbols rather than letters and digits.
+def is_date_range(text: str) -> bool:
+    """True when the cell covers a span of days rather than one."""
+    return bool(_RANGE.search(text or ""))
 
-    This catches stray ink and ruling picked up as text. It does **not** detect
-    a Thai cell read by the Latin model: that comes back as plausible Latin
-    letters, so no test on the string can recognise it. Thai cells are flagged
-    by which column they came from - see ``form_layout.THAI_ROLES``.
+
+def clean_thai_date(text: str) -> tuple[dt.date | None, bool]:
+    """Parse a date written with a Thai month, such as ``"3 ม.ค.68"``.
+
+    Returns ``(value, certain)`` like the other cleaners. A range returns
+    ``(None, True)``: nothing failed to be read, there simply is no single date
+    to give, and the output column carries the text either way.
     """
-    stripped = re.sub(r"\s", "", text or "")
-    if not stripped:
-        return False
-    readable = len(_READABLE.findall(stripped))
-    return readable / len(stripped) < 0.5
+    raw = (text or "").strip()
+    if not raw:
+        return None, True
+    if is_date_range(raw):
+        return None, True
+
+    compact = re.sub(r"[\s.]", "", raw)
+    month = next(
+        (number for name, number in _THAI_MONTHS.items() if name in compact), None
+    )
+    if month is None:
+        return None, False
+
+    numbers = re.findall(r"\d+", compact)
+    if len(numbers) < 2:
+        return None, False
+
+    # Day first, year last: these forms write them in that order, and the month
+    # between them has already been taken out of the running.
+    return _build_date(numbers[0], str(month), numbers[-1]), True

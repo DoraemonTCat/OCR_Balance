@@ -141,7 +141,9 @@ def parse_page(image, page_number: int, ocr, text_layer=None) -> PageParse:
     rows: list[LedgerRow] = []
     for index, band in enumerate(bands):
         cells, corrected = _cells(band, grid, form)
-        row = _build_row(cells, page_number, index, form, band, corrected)
+        row = _build_row(
+            cells, page_number, index, form, band, corrected, text_layer is not None
+        )
         if row is not None:
             rows.append(row)
 
@@ -384,6 +386,7 @@ def _build_row(
     form: FormLayout,
     boxes,
     corrected: set[str] = frozenset(),
+    from_text_layer: bool = False,
 ) -> LedgerRow | None:
     """Validate and normalise one band, or return None if it is not a data row.
 
@@ -399,7 +402,13 @@ def _build_row(
     entry whose date was mangled and whose name wrapped out of its band - five
     of the eleven rows on page 1 of the sample, each with its quantities intact.
     """
-    entry_date, date_certain = norm.clean_date(cells.get(form_layout.DATE, ""))
+    raw_date = cells.get(form_layout.DATE, "")
+    # The ประเภท ๒ forms write the month in Thai; the handwritten ones write it
+    # as a number. Try the Thai reading first and fall back, so one parser does
+    # not have to cover both conventions at once.
+    entry_date, date_certain = norm.clean_thai_date(raw_date)
+    if entry_date is None and not norm.is_date_range(raw_date):
+        entry_date, date_certain = norm.clean_date(raw_date)
     has_name = _looks_like_a_name(cells.get(form_layout.GENERIC_NAME, ""))
     figures = sum(
         1
@@ -452,12 +461,12 @@ def _build_row(
             row.flag(f"{role} could not be read as a number")
 
     row.date_certain = entry_date is not None and date_certain
-    if entry_date is None:
+    if entry_date is None and not norm.is_date_range(raw_date):
         row.flag("date could not be read")
     elif not date_certain:
         row.flag("date reconstructed from an unclear cell")
 
-    if not _reads_thai():
+    if not _reads_thai(from_text_layer):
         for role in form_layout.THAI_ROLES:
             if cells.get(role):
                 row.flag(f"{role} is written in Thai, which this engine cannot read")
@@ -466,8 +475,19 @@ def _build_row(
     return row
 
 
-def _reads_thai() -> bool:
-    """Whether the configured OCR engine can read the Thai cells at all."""
+def _reads_thai(from_text_layer: bool) -> bool:
+    """Whether the Thai cells on this page could be read at all.
+
+    A page read from the file's own text is in Thai already and correct - the
+    recipient's name, the unit, the remark. A page that had to be recognised is
+    only as good as the engine, and PaddleOCR 2.9.1 has no Thai model.
+
+    Flagging by the engine's language alone marked every Thai cell of a
+    searchable PDF as unreadable while printing the right answer beside it.
+    """
+    if from_text_layer:
+        return True
+
     from django.conf import settings
 
     return settings.OCR["LANGUAGE"] in form_layout.THAI_CAPABLE_LANGUAGES
@@ -543,7 +563,12 @@ def settle_dates(rows: list[LedgerRow]) -> None:
             if row.entry_date is not None:
                 previous_day = row.entry_date.day
                 continue
-            day = _only_possible_day(row.get(form_layout.DATE), previous_day, month)
+            cell = row.get(form_layout.DATE)
+            if norm.is_date_range(cell):
+                # "3-31 ม.ค. 68" has no single day to recover, and taking its
+                # first number would turn a month of dispensing into one day.
+                continue
+            day = _only_possible_day(cell, previous_day, month)
             if day is None:
                 continue
             row.entry_date = dt.date(year, month, day)

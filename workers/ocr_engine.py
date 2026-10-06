@@ -12,10 +12,8 @@ from dataclasses import dataclass
 
 try:
     import cv2
-    import numpy as np
 except ImportError:  # pragma: no cover - the API image does not need OpenCV
     cv2 = None
-    np = None
 
 from django.conf import settings
 
@@ -69,22 +67,6 @@ def get_engine():
     return _engine
 
 
-def decode(png_bytes: bytes):
-    """Decode a rendered page into a BGR array."""
-    if cv2 is None:  # pragma: no cover
-        raise OcrFailed("OpenCV (opencv-python-headless) is not installed")
-    buffer = np.frombuffer(png_bytes, dtype=np.uint8)
-    image = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
-    if image is None:
-        raise OcrFailed("cannot decode rendered page image")
-    return image
-
-
-def preprocess(png_bytes: bytes):
-    """Decode a rendered page and prepare it for OCR."""
-    return preprocess_image(decode(png_bytes))
-
-
 def preprocess_image(image):
     """Grayscale, denoise and binarise before OCR.
 
@@ -92,8 +74,8 @@ def preprocess_image(image):
     documents are scanned unevenly: a global cut-off loses the faint text on the
     darker side of the page.
 
-    Takes an array rather than encoded bytes so the balance pipeline can OCR the
-    page it has already deskewed instead of re-encoding it to PNG in between.
+    Takes an array, not encoded bytes: the pipeline renders a page, deskews it
+    and hands the array straight over, so nothing is ever encoded to PNG.
     """
     if cv2 is None:  # pragma: no cover
         raise OcrFailed("OpenCV (opencv-python-headless) is not installed")
@@ -111,11 +93,6 @@ def preprocess_image(image):
     )
     # PaddleOCR expects 3 channels.
     return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-
-
-def recognize(png_bytes: bytes, page_number: int = 0) -> OcrPage:
-    """OCR one rendered page into lines with bounding boxes and confidence."""
-    return recognize_image(decode(png_bytes), page_number)
 
 
 def recognize_image(image, page_number: int = 0) -> OcrPage:

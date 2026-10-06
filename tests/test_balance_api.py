@@ -17,7 +17,7 @@ from openpyxl import load_workbook
 from rest_framework import status
 
 from apps.balance.models import BalanceDocument, DocumentStatus
-from workers import balance_export, form_layout
+from workers import form_layout
 from workers.balance_parser import LedgerRow
 from workers.balance_pipeline import DocumentResult, PageOutcome
 

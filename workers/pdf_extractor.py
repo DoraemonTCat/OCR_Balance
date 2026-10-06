@@ -143,12 +143,6 @@ def inspect(path: Path) -> PdfMetadata:
 #: same grid the rendered image was measured on.
 _PDF_UNITS_PER_INCH = 72.0
 
-#: A page with fewer text fragments than this inside it is treated as a scan,
-#: whatever stray marks the file may carry. A real page of these forms has the
-#: printed headings alone well past it.
-MIN_SPANS_FOR_TEXT_LAYER = 20
-
-
 def has_usable_text(page) -> bool:
     """Whether this page's own text is worth reading instead of OCR-ing it."""
     return len(page.get_text("text").strip()) >= MIN_TEXT_CHARS_PER_PAGE

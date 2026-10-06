@@ -176,3 +176,13 @@ class SettleDatesTests(SimpleTestCase):
         guess = _dated(1, "1%/7/69", dt.date(2026, 7, 18))
         balance_parser.settle_dates([guess])
         self.assertEqual(guess.entry_date, dt.date(2026, 7, 18))
+
+
+class DateRangeTests(SimpleTestCase):
+    """A range covers a span of days and must not become one of them."""
+
+    def test_a_range_is_left_without_a_date(self):
+        clean = _dated(1, "16/3/69", dt.date(2026, 3, 16), certain=True)
+        spanning = _dated(1, "3-31 ม.ค. 68")
+        balance_parser.settle_dates([clean, spanning])
+        self.assertIsNone(spanning.entry_date)

@@ -69,23 +69,6 @@ class BatchTests(SimpleTestCase):
         self.assertFalse(certain)
 
 
-class ReadabilityTests(SimpleTestCase):
-    def test_symbol_noise_is_unreadable(self):
-        self.assertTrue(norm.looks_unreadable("$/@ ..%"))
-
-    def test_a_drug_name_is_readable(self):
-        self.assertFalse(norm.looks_unreadable("Lorazepam 1 mg"))
-
-    def test_empty_is_not_unreadable(self):
-        self.assertFalse(norm.looks_unreadable("   "))
-
-    def test_thai_read_as_latin_is_not_detectable_here(self):
-        # "ชลิดา จันทร์สด" comes back from the Latin model as "t@on SunScQ":
-        # plausible letters, indistinguishable from a name that was read. This
-        # is why Thai cells are flagged by column, not by inspecting the text.
-        self.assertFalse(norm.looks_unreadable("t@on SunScQ"))
-
-
 class CorrectedCellTests(SimpleTestCase):
     """A figure struck through and rewritten is two figures, not one number."""
 
@@ -102,3 +85,35 @@ class CorrectedCellTests(SimpleTestCase):
     def test_an_empty_cell_holds_nothing(self):
         self.assertFalse(norm.holds_two_figures(""))
         self.assertFalse(norm.holds_two_figures("-"))
+
+
+class ThaiDateTests(SimpleTestCase):
+    """The ประเภท ๒ forms write the month in Thai, and sometimes a range."""
+
+    def test_reads_a_thai_month(self):
+        self.assertEqual(
+            norm.clean_thai_date("3 ม.ค.68"), (dt.date(2025, 1, 3), True)
+        )
+
+    def test_the_full_stops_are_optional(self):
+        # One form writes "3 มค 68", the other "3 ม.ค.68".
+        self.assertEqual(norm.clean_thai_date("3 มค 68")[0], dt.date(2025, 1, 3))
+
+    def test_a_two_digit_day(self):
+        self.assertEqual(norm.clean_thai_date("20มค 68")[0], dt.date(2025, 1, 20))
+
+    def test_a_range_is_not_a_failure(self):
+        # "3-31 ม.ค. 68" is a month of dispensing on one line. There is no date
+        # to give, but nothing failed to be read either.
+        self.assertEqual(norm.clean_thai_date("3-31 ม.ค. 68"), (None, True))
+        self.assertTrue(norm.is_date_range("3-31 ม.ค. 68"))
+
+    def test_a_cell_with_no_thai_month_is_refused(self):
+        # Left for the numeric parser the handwritten forms need.
+        self.assertEqual(norm.clean_thai_date("16/3/69"), (None, False))
+
+    def test_an_empty_cell_is_not_an_error(self):
+        self.assertEqual(norm.clean_thai_date(""), (None, True))
+
+    def test_a_mangled_cell_is_refused_rather_than_guessed(self):
+        self.assertEqual(norm.clean_thai_date("3คม.68.")[0], None)

@@ -108,9 +108,6 @@ class Grid:
                 return index
         return None
 
-    def column_bounds(self, index: int) -> tuple[float, float]:
-        return self.x_rules[index], self.x_rules[index + 1]
-
     @property
     def top(self) -> float:
         return self.y_rules[0]

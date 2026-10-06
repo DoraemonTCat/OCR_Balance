@@ -14,5 +14,10 @@ data/export/*
 !data/*/.gitkeep
 data/*.sqlite3
 
+# Scratch output from trying the API by hand.
+/result.json
+/output.xlsx
+/list.json
+
 staticfiles/
 *.log
