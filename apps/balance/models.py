@@ -92,6 +92,12 @@ class BalanceEntry(models.Model):
     form_code = models.CharField(max_length=30)
 
     entry_date = models.DateField(null=True, blank=True)
+    #: The date cell as the form writes it. Kept because that is what the
+    #: agreed output carries: these forms use Thai month abbreviations, and the
+    #: report form puts a range on a line - "3-31 ม.ค. 68" is a month of
+    #: dispensing summarised, which is not a date and must not be forced into
+    #: one. ``entry_date`` is the parse of it, where there is one to make.
+    entry_date_text = models.CharField(max_length=60, blank=True)
     generic_name = models.TextField(blank=True)
     trade_name = models.TextField(blank=True)
     batch_no = models.CharField(max_length=100, blank=True)

@@ -28,6 +28,7 @@ handwritten lines.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 
 try:
@@ -55,13 +56,47 @@ class Grid:
     #: y of every horizontal rule found, top to bottom. Sparse and unreliable by
     #: design - see the module docstring - so only its extremes are used.
     y_rules: list[float] = field(default_factory=list)
-    #: Rotation removed from the page, in degrees. Needed to map OCR boxes taken
-    #: from the deskewed image back to the original, and vice versa.
+    #: Rotation removed from the page, in degrees.
     skew_angle: float = 0.0
+    #: (width, height) of the page the rules were measured on, in px. Needed to
+    #: repeat the deskew on coordinates that did not come from that image.
+    image_size: tuple[int, int] = (0, 0)
 
     @property
     def columns(self) -> int:
         return max(len(self.x_rules) - 1, 0)
+
+    def deskew_box(self, bbox: tuple[float, float, float, float]):
+        """Put a box from the original page into the deskewed page's frame.
+
+        The rules are measured after the page is straightened, so anything
+        measured before it - the text the PDF already carries, whose
+        coordinates come from the file rather than from the image - has to be
+        turned through the same angle before it can be assigned to a column.
+        Skipping this costs a whole column's width at 0.75 degrees across a page
+        this wide.
+        """
+        if not self.skew_angle:
+            return bbox
+        radians = math.radians(self.skew_angle)
+        alpha, beta = math.cos(radians), math.sin(radians)
+        center_x, center_y = self.image_size[0] / 2, self.image_size[1] / 2
+
+        def turn(x: float, y: float) -> tuple[float, float]:
+            return (
+                alpha * (x - center_x) + beta * (y - center_y) + center_x,
+                -beta * (x - center_x) + alpha * (y - center_y) + center_y,
+            )
+
+        corners = [
+            turn(bbox[0], bbox[1]),
+            turn(bbox[2], bbox[1]),
+            turn(bbox[0], bbox[3]),
+            turn(bbox[2], bbox[3]),
+        ]
+        xs = [point[0] for point in corners]
+        ys = [point[1] for point in corners]
+        return (min(xs), min(ys), max(xs), max(ys))
 
     def column_for(self, x: float) -> int | None:
         """Index of the column containing ``x``, or None outside the table."""
@@ -138,42 +173,43 @@ def _require_cv2():
 _MAX_SKEW_DEGREES = 5.0
 
 
+#: A contour has to run this far across the page to be one of the table's rules
+#: rather than a word, a stroke of handwriting or an underline.
+_RULE_SPAN_SHARE = 0.25
+
+#: and has to be this flat: ten times longer than it is thick.
+_RULE_FLATNESS = 0.1
+
+
 def deskew(image) -> tuple["np.ndarray", float]:
     """Rotate the page so its printed rules are axis-aligned.
 
-    The angle is taken from the long straight edges found by a probabilistic
-    Hough transform, using the median of the near-horizontal ones. The median
-    rejects the handwriting strokes and the page border that also produce
-    segments.
+    The angle is measured on the rules themselves: the horizontal ink is
+    isolated with a long opening, each run that crosses a quarter of the page is
+    fitted with a line, and the median of their angles is removed. Those runs
+    are precisely what the column detection has to see as straight, so this
+    measures the thing it is trying to fix.
+
+    The obvious alternative, a probabilistic Hough transform over the page's
+    edges, reads every edge in the document - the text, the boxed note in the
+    margin, the border of the scan - and its median is dominated by whichever of
+    those is most numerous. On two of the four pages of ``Sample.pdf`` it
+    reported no tilt at all where the rules slope by 0.4 and 0.6 degrees, and a
+    rule sloping that far across 3000 px covers 30 px of scanlines: no row of
+    the image is then more than a fraction of a rule, and the table is lost.
     """
     _require_cv2()
-    gray = _to_gray(image)
-    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
-    min_length = max(gray.shape[1] // 6, 100)
-    segments = cv2.HoughLinesP(
-        edges,
-        rho=1,
-        theta=np.pi / 1800,  # 0.1 deg: a 0.5 deg error still breaks a long rule
-        threshold=120,
-        minLineLength=min_length,
-        maxLineGap=12,
-    )
-    if segments is None:
-        return image, 0.0
-
-    angles = []
-    for x0, y0, x1, y1 in segments[:, 0]:
-        angle = np.degrees(np.arctan2(float(y1 - y0), float(x1 - x0)))
-        if abs(angle) <= _MAX_SKEW_DEGREES:
-            angles.append(angle)
+    angles = _rule_angles(image)
     if not angles:
         return image, 0.0
 
     angle = float(np.median(angles))
+    if abs(angle) > _MAX_SKEW_DEGREES:  # a mis-measurement, not a tilted scan
+        return image, 0.0
     if abs(angle) < 0.05:  # already straight; skip the resampling blur
         return image, 0.0
 
-    height, width = gray.shape[:2]
+    height, width = image.shape[:2]
     matrix = cv2.getRotationMatrix2D((width / 2, height / 2), angle, 1.0)
     rotated = cv2.warpAffine(
         image,
@@ -183,6 +219,28 @@ def deskew(image) -> tuple["np.ndarray", float]:
         borderMode=cv2.BORDER_REPLICATE,
     )
     return rotated, angle
+
+
+def _rule_angles(image) -> list[float]:
+    """The angle of every long horizontal run of ink on the page."""
+    binary = _binarize(_to_gray(image))
+    height, width = binary.shape[:2]
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(width // 25, 20), 1))
+    mask = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    angles: list[float] = []
+    for contour in contours:
+        _, _, span, thickness = cv2.boundingRect(contour)
+        if span < width * _RULE_SPAN_SHARE or thickness > span * _RULE_FLATNESS:
+            continue
+        dx, dy = cv2.fitLine(contour, cv2.DIST_L2, 0, 0.01, 0.01).ravel()[:2]
+        if dx == 0:
+            continue
+        angle = float(np.degrees(np.arctan2(dy, dx)))
+        if abs(angle) <= _MAX_SKEW_DEGREES:
+            angles.append(angle)
+    return angles
 
 
 # --- grid ------------------------------------------------------------------
@@ -222,7 +280,12 @@ def detect(image, *, min_columns: int = 6) -> tuple["np.ndarray", Grid]:
     if len(y_rules) < 2:
         raise GridNotFound("no table grid: the table box has no horizontal rules")
 
-    grid = Grid(x_rules=x_rules, y_rules=y_rules, skew_angle=angle)
+    grid = Grid(
+        x_rules=x_rules,
+        y_rules=y_rules,
+        skew_angle=angle,
+        image_size=(width, height),
+    )
     log.debug(
         "grid detected",
         extra={

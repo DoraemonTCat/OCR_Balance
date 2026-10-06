@@ -1,28 +1,18 @@
 """Excel output for a psychotropic ledger extraction.
 
-Sheet 1 carries the sixteen columns of ``ตัวอย่าง Colume.xlsx`` exactly, in that
-order, because that is the agreed output shape.
+Sheet 1 carries the twelve columns of ``ฟอแมทตาราง OCR.xlsx`` exactly: the same
+headings, the same order, and the same two-row header with ``จำหน่ายให้`` spanning
+its two sub-columns and ``จำนวน`` its four.
 
-Only three of them exist on the ledger forms:
+Unlike the sixteen-column shape this replaced - which described a
+purchase-approval record and had somewhere to put only four of the things a
+ledger says - these columns *are* the ledger, so eleven of the twelve come
+straight off the form. Only ``ลำดับ`` is this service's own: the forms do not
+number their lines, so it is counted here, restarting at each new form.
 
-===============================  ====================================
-Column                           Source
-===============================  ====================================
-ProductGenericName               ชื่อและความแรงของวัตถุออกฤทธิ์
-ProductTradeName                 ชื่อการค้า (ร.ค.-๔ and บ.ว.จ ๗/๔-ขพ)
-ประเภทวัตุถเสพติด                 the form's own subject line
-วันที่สร้าง                        วัน เดือน ปี of the entry
-===============================  ====================================
-
-The other twelve - เลขที่คำขอซื้อ, เลขที่ใบอนุญาต, จำนวนที่ขอซื้อ, จำนวนที่อนุมัติ,
-ยอดเงินที่อนุมัติ, วันที่อนุมัติ, ชื่อสถานพยาบาล, ที่ตั้ง, จังหวัด, ผู้ดำเนินกิจการ and the
-two invoice fields - belong to a purchase-approval record. The ledgers do not
-contain them, so those cells are left empty rather than filled with a guess.
-
-Sheet 2 therefore carries what the forms *do* say: the full ledger line,
-including the ยอดยกมา / รับ / จ่าย / คงเหลือ figures that the sixteen columns have
-no place for. Sheet 3 is the per-page outcome, which is where a page that could
-not be read is visible.
+Sheet 2 carries the rest of what a form says and the review verdict - the unit,
+the remark, which page a line came from, and why a value is not to be trusted.
+Sheet 3 is the per-page outcome, where a page that could not be read is visible.
 """
 from __future__ import annotations
 
@@ -36,25 +26,34 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from workers import form_layout
 
-#: Sheet 1, verbatim from ตัวอย่าง Colume.xlsx. Order and spelling are the
-#: customer's, including "ประเภทวัตุถเสพติด", and are not corrected here.
-OUTPUT_COLUMNS: Sequence[tuple[str, int]] = (
-    ("เลขที่คำขอซื้อ", 18),
-    ("ProductGenericName", 34),
-    ("ProductTradeName", 30),
-    ("ประเภทวัตุถเสพติด", 34),
-    ("เลขที่ใบอนุญาต", 18),
-    ("จำนวนที่ขอซื้อ", 14),
-    ("จำนวนที่อนุมัติ", 14),
-    ("ยอดเงินที่อนุมัติ", 16),
-    ("วันที่สร้าง", 14),
-    ("วันที่อนุมัติ", 14),
-    ("ชื่อสถานพยาบาล", 28),
-    ("ที่ตั้ง", 40),
-    ("จังหวัด", 14),
-    ("ผู้ดำเนินกิจการ", 24),
-    ("เลขที่ใบแจ้งหนี้/ใบเสร็จ", 20),
-    ("วันที่ออกใบแจ้งหนี้/ใบเสร็จ", 22),
+#: Sheet 1, verbatim from ฟอแมทตาราง OCR.xlsx: (top heading, sub-heading, width).
+#: A sub-heading of None means the column has a single heading spanning both
+#: header rows. The line breaks are the customer's and are kept, because the
+#: JSON keys are these strings.
+OUTPUT_COLUMNS: Sequence[tuple[str, "str | None", int]] = (
+    ("ลำดับ", None, 7),
+    ("วัน\nเดือน\nปี", None, 14),
+    ("ชื่อ/ความแรงของวัตถุออกฤทธิ์", None, 30),
+    ("ชื่อการค้า", None, 22),
+    ("เลขที่/รุ่นที่/\nครั้งที่ผลิต", None, 14),
+    ("ได้มาจาก", None, 14),
+    ("จำหน่ายให้", "ชื่อ-นามสกุล\nผู้รับยา", 24),
+    (
+        "จำหน่ายให้",
+        "เลขที่บัตรประจำตัวประชาชน/\nหนังสือเดินทาง/บัตรประจำตัวอื่น\n"
+        "ที่ทางราชการออกให้",
+        30,
+    ),
+    ("จำนวน", "ยกมา", 10),
+    ("จำนวน", "รับ", 10),
+    ("จำนวน", "จ่าย", 10),
+    ("จำนวน", "คงเหลือ", 10),
+)
+
+#: The key each column is given in the API's JSON: the sub-heading where there
+#: is one, the heading otherwise, so every key is distinct.
+OUTPUT_KEYS: Sequence[str] = tuple(
+    sub if sub else top for top, sub, _ in OUTPUT_COLUMNS
 )
 
 #: Sheet 2: the ledger line as the form sets it out.
@@ -123,62 +122,70 @@ def build(rows, pages) -> bytes:
     return buffer.getvalue()
 
 
-#: 1-based positions of the four columns the ledgers can actually fill. The
-#: rest belong to a purchase-approval record and stay empty.
-SOURCED_COLUMNS = (2, 3, 4, 9)
-
-
-def output_values(row) -> list:
-    """The sixteen agreed columns for one entry, in order.
+def output_values(row, sequence: int) -> list:
+    """The twelve agreed columns for one entry, in order.
 
     The single definition of that mapping. The workbook's first sheet and the
     API's JSON are both built from it, so the two cannot drift apart - which
     they would, being written in different modules against the same agreed list.
+
+    ``sequence`` is the ลำดับ, which the forms do not carry; see ``sequences``.
+
+    The date is the cell as the form writes it, not a date value: these forms
+    use Thai month abbreviations and, on the report form, ranges - "3-31 ม.ค.
+    68" covers a whole month of dispensing on one line. A range is not a date
+    and squeezing it into one would lose what the line actually says.
     """
     return [
-        "",                              # เลขที่คำขอซื้อ
-        _value(row, "generic_name"),
-        _value(row, "trade_name"),
-        SUBSTANCE_TYPE,
-        "",                              # เลขที่ใบอนุญาต
-        None,                            # จำนวนที่ขอซื้อ
-        None,                            # จำนวนที่อนุมัติ
-        None,                            # ยอดเงินที่อนุมัติ
-        _date(row),
-        None,                            # วันที่อนุมัติ
-        "",                              # ชื่อสถานพยาบาล
-        "",                              # ที่ตั้ง
-        "",                              # จังหวัด
-        "",                              # ผู้ดำเนินกิจการ
-        "",                              # เลขที่ใบแจ้งหนี้/ใบเสร็จ
-        None,                            # วันที่ออกใบแจ้งหนี้/ใบเสร็จ
+        sequence,
+        _value(row, "entry_date_text") or _text(row, form_layout.DATE),
+        _text(row, form_layout.GENERIC_NAME),
+        _text(row, form_layout.TRADE_NAME),
+        _text(row, form_layout.BATCH_NO),
+        _text(row, form_layout.RECEIVED_FROM),
+        _text(row, form_layout.ISSUED_TO),
+        _text(row, form_layout.RECIPIENT_ID),
+        _quantity(row, form_layout.BALANCE_BROUGHT),
+        _quantity(row, form_layout.RECEIVED),
+        _quantity(row, form_layout.ISSUED),
+        _quantity(row, form_layout.BALANCE),
     ]
 
 
-def output_row(row) -> dict:
-    """The sixteen agreed columns for one entry, keyed by their header."""
-    return {
-        title: value
-        for (title, _), value in zip(OUTPUT_COLUMNS, output_values(row))
-    }
+def sequences(rows) -> list[int]:
+    """The ลำดับ of each row: a running count that restarts at each new form.
+
+    The forms do not number their own lines, and a submission holds the returns
+    of more than one of them, so one number running through the file would say
+    nothing. Restarting per form makes it the line number within that form,
+    which is what a reader checking against the paper needs.
+    """
+    numbers: list[int] = []
+    current: str | None = None
+    count = 0
+    for row in rows:
+        form = _value(row, "form_code")
+        if form != current:
+            current, count = form, 0
+        count += 1
+        numbers.append(count)
+    return numbers
+
+
+def output_row(row, sequence: int) -> dict:
+    """The twelve agreed columns for one entry, keyed by their heading."""
+    return dict(zip(OUTPUT_KEYS, output_values(row, sequence)))
 
 
 def _write_output(sheet: Worksheet, rows) -> None:
     _header(sheet, OUTPUT_COLUMNS)
-    # The twelve columns with no source are shaded so a reader can see at a
-    # glance that they are empty by nature, not because extraction missed them.
-    for row in rows:
-        sheet.append(output_values(row))
-        written = sheet[sheet.max_row]
-        written[8].number_format = _DATE_FORMAT
-        for index, cell in enumerate(written, start=1):
-            if index not in SOURCED_COLUMNS:
-                cell.fill = _EMPTY_FILL
+    for row, sequence in zip(rows, sequences(rows)):
+        sheet.append(output_values(row, sequence))
         if _value(row, "needs_review"):
-            for index in SOURCED_COLUMNS:
-                written[index - 1].fill = _REVIEW_FILL
+            for cell in sheet[sheet.max_row]:
+                cell.fill = _REVIEW_FILL
 
-    _finish(sheet, OUTPUT_COLUMNS)
+    _finish(sheet, OUTPUT_COLUMNS, header_rows=2)
 
 
 def _write_ledger(sheet: Worksheet, rows) -> None:
@@ -252,6 +259,16 @@ def _value(row, name: str):
     return (cells or {}).get(name, "")
 
 
+def _text(row, role: str) -> str:
+    """A cell's text, whether the row is a parsed one or a stored one.
+
+    The parser keys its cells by column role and the stored row has one
+    attribute per column; the roles are named after those attributes, so the
+    same name reaches both.
+    """
+    return _value(row, role)
+
+
 def _quantity(row, role: str):
     quantities = getattr(row, "quantities", None)
     if quantities is not None:
@@ -271,19 +288,61 @@ def _confidence(row):
 # --- sheet furniture -------------------------------------------------------
 
 
-def _header(sheet: Worksheet, columns: Sequence[tuple[str, int]]) -> None:
-    sheet.append([title for title, _ in columns])
-    for index, (_, width) in enumerate(columns, start=1):
-        cell = sheet.cell(row=1, column=index)
-        cell.fill = _HEADER_FILL
-        cell.font = _HEADER_FONT
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+def _header(sheet: Worksheet, columns: Sequence[tuple]) -> None:
+    """Write a header of one row, or of two with the spans merged.
+
+    A three-part column - (heading, sub-heading, width) - makes a two-row
+    header: a column with no sub-heading is merged down over both rows, and
+    neighbours sharing a heading are merged across, which is how
+    ``ฟอแมทตาราง OCR.xlsx`` sets out จำหน่ายให้ and จำนวน.
+    """
+    two_row = len(columns[0]) == 3
+    if not two_row:
+        sheet.append([title for title, _ in columns])
+    else:
+        sheet.append([top if sub is None else top for top, sub, _ in columns])
+        sheet.append(["" if sub is None else sub for _, sub, _ in columns])
+
+    rows = 2 if two_row else 1
+    for index, column in enumerate(columns, start=1):
+        width = column[-1]
         sheet.column_dimensions[get_column_letter(index)].width = width
-    sheet.row_dimensions[1].height = 30
+        for row in range(1, rows + 1):
+            cell = sheet.cell(row=row, column=index)
+            cell.fill = _HEADER_FILL
+            cell.font = _HEADER_FONT
+            cell.alignment = Alignment(
+                horizontal="center", vertical="center", wrap_text=True
+            )
+    for row in range(1, rows + 1):
+        sheet.row_dimensions[row].height = 30 if not two_row else 26
+
+    if two_row:
+        _merge_header(sheet, columns)
 
 
-def _finish(sheet: Worksheet, columns: Sequence[tuple[str, int]]) -> None:
-    sheet.freeze_panes = "A2"
+def _merge_header(sheet: Worksheet, columns: Sequence[tuple]) -> None:
+    index = 1
+    while index <= len(columns):
+        top, sub, _ = columns[index - 1]
+        if sub is None:
+            sheet.merge_cells(start_row=1, start_column=index, end_row=2, end_column=index)
+            index += 1
+            continue
+        span = index
+        while span < len(columns) and columns[span][0] == top:
+            span += 1
+        sheet.merge_cells(start_row=1, start_column=index, end_row=1, end_column=span)
+        index = span + 1
+
+
+def _finish(
+    sheet: Worksheet, columns: Sequence[tuple], header_rows: int = 1
+) -> None:
+    sheet.freeze_panes = f"A{header_rows + 1}"
+    last = get_column_letter(len(columns))
+    # The filter goes on the row the data is actually labelled by: with a merged
+    # two-row header that is the second row, not the first.
     sheet.auto_filter.ref = (
-        f"A1:{get_column_letter(len(columns))}{max(sheet.max_row, 1)}"
+        f"A{header_rows}:{last}{max(sheet.max_row, header_rows)}"
     )

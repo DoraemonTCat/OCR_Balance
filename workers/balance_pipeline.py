@@ -33,6 +33,7 @@ from workers import balance_parser, ocr_engine
 from workers.balance_parser import LedgerRow, PageParse
 from workers.form_layout import FormNotRecognised
 from workers.grid_detector import GridNotFound
+from workers import pdf_extractor
 from workers.pdf_extractor import PdfError, inspect
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,8 @@ class PageOutcome:
     rows: int = 0
     skew_angle: float = 0.0
     confidence: float | None = None
+    #: TEXT_LAYER when the file's own text was used, OCR when it was recognised.
+    source: str = ""
     error: str = ""
 
     def as_dict(self) -> dict:
@@ -55,6 +58,7 @@ class PageOutcome:
             "form": self.form_code,
             "rows": self.rows,
             "skew": round(self.skew_angle, 2),
+            "source": self.source,
             "confidence": self.confidence,
             "error": self.error,
         }
@@ -92,10 +96,23 @@ def extract(path: Path, *, dpi: int | None = None) -> DocumentResult:
             page_number = index + 1
             outcome = PageOutcome(page_number=page_number)
             try:
-                image = _render(document.load_page(index), render_dpi)
-                parse = balance_parser.parse_page(
-                    image, page_number, ocr_engine.recognize_image
+                pdf_page = document.load_page(index)
+                image = _render(pdf_page, render_dpi)
+                # A file that already carries its text is read from the file.
+                # Nothing an OCR engine can do improves on it, and the Thai
+                # cells that no engine here can read at all come out right.
+                text_layer = (
+                    pdf_extractor.text_boxes(pdf_page, render_dpi)
+                    if pdf_extractor.has_usable_text(pdf_page)
+                    else None
                 )
+                parse = balance_parser.parse_page(
+                    image,
+                    page_number,
+                    ocr_engine.recognize_image,
+                    text_layer=text_layer,
+                )
+                outcome.source = "TEXT_LAYER" if text_layer else "OCR"
                 result.rows.extend(parse.rows)
                 _fill(outcome, parse)
             except (GridNotFound, FormNotRecognised) as exc:

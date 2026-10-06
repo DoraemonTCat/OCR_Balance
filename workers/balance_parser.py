@@ -30,7 +30,7 @@ import datetime as dt
 import logging
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from workers import balance_normalizer as norm
 from workers import form_layout
@@ -90,18 +90,52 @@ class PageParse:
     confidence: float | None
 
 
-def parse_page(image, page_number: int, ocr) -> PageParse:
+@dataclass(slots=True)
+class _TextLayerPage:
+    """What the parser needs of a page, when its text came from the file."""
+
+    lines: list
+    #: The file's text is not a reading, so there is no reading to doubt.
+    confidence: float | None = 1.0
+
+
+def parse_page(image, page_number: int, ocr, text_layer=None) -> PageParse:
     """Parse one rendered page.
 
-    ``image`` is a BGR array of the page. ``ocr`` is called with the *deskewed*
-    image and must return an object with ``lines`` carrying ``text``, ``bbox``
-    and ``confidence`` - ``ocr_engine.recognize_image`` already does.
+    ``image`` is a BGR array of the page.
+
+    ``text_layer``, when the file carries one, is the page's own text as boxes
+    in the pixels of that render - ``pdf_extractor.text_boxes``. It is used in
+    place of OCR, because it is not a reading of the page but the page itself:
+    correct, Thai included, down to the character. ``ocr`` is then never called,
+    which also skips loading the model.
+
+    Without it, ``ocr`` is called with the *deskewed* image and must return an
+    object whose ``lines`` carry ``text``, ``bbox`` and ``confidence`` -
+    ``ocr_engine.recognize_image`` does.
     """
     straight, grid = detect(image)
-    page = ocr(straight)
-    form = form_layout.identify(grid.column_widths)
 
-    inside = [box for box in page.lines if _in_table(box, grid)]
+    if text_layer is not None:
+        # The rules were measured after the page was straightened; the file's
+        # own coordinates were not, so they have to be turned to match.
+        boxes = [
+            replace(box, bbox=grid.deskew_box(box.bbox)) for box in text_layer
+        ]
+        page = _TextLayerPage(boxes)
+    else:
+        page = ocr(straight)
+
+    form = form_layout.identify_by_title(
+        [box.text for box in page.lines]
+    ) or form_layout.identify(grid.column_widths)
+
+    header_bottom = _printed_header_bottom(page.lines, grid)
+    inside = [
+        box
+        for box in page.lines
+        if _in_table(box, grid) and box.bbox[3] > header_bottom
+    ]
     bands = _row_bands(inside, grid, form)
 
     rows: list[LedgerRow] = []
@@ -151,6 +185,40 @@ def _looks_like_a_name(text: str) -> bool:
 #: restates a balance and then changes it, while the total line gives one
 #: closing figure and dashes.
 _MIN_FIGURES = 2
+
+
+#: Share of the table's height to look for column titles in. The header of
+#: these forms is one or two bands at the top; half the table clears them and
+#: still stops well short of the footnotes.
+_HEADER_SEARCH_SHARE = 0.5
+
+
+def _printed_header_bottom(boxes, grid: Grid) -> float:
+    """y below which the entries start, read off the printed column titles.
+
+    The grid's own answer is a guess from the horizontal rules, and on a page
+    that rules a note in its margin it points at that note instead of the table.
+    Where the text can be read the titles say it exactly: the lowest of them is
+    the last thing above the first entry.
+
+    Falls back to the grid when nothing recognisable is found, which is every
+    handwritten scan - there the titles are Thai and unreadable.
+    """
+    # Only inside the table, and only in its upper half: "หมายเหตุ" heads a
+    # column *and* the footnotes under the page, and the footnotes are lower
+    # than every entry.
+    limit = grid.top + (grid.bottom - grid.top) * _HEADER_SEARCH_SHARE
+    bottoms = [
+        box.bbox[3]
+        for box in boxes
+        if _in_table(box, grid)
+        and (box.bbox[1] + box.bbox[3]) / 2 < limit
+        and any(
+            word in form_layout.normalise(box.text)
+            for word in form_layout.HEADER_WORDS
+        )
+    ]
+    return max(bottoms) if bottoms else grid.header_bottom
 
 
 def _in_table(box, grid: Grid) -> bool:
@@ -253,11 +321,60 @@ def _cells(boxes, grid: Grid, form: FormLayout) -> dict[str, str]:
     cells: dict[str, str] = {}
     corrected: set[str] = set()
     for role, items in buckets.items():
-        items.sort(key=lambda box: box.bbox[0])
-        cells[role] = norm.clean_text(" ".join(box.text for box in items))
+        cells[role] = norm.clean_text(_join(items))
         if role in form_layout.NUMERIC_ROLES and norm.holds_two_figures(cells[role]):
             corrected.add(role)
     return cells, corrected
+
+
+#: Vertical tolerance for telling one line of a wrapped cell from the next.
+_CELL_LINE_TOLERANCE = 1.0
+
+#: Two fragments on one line closer than this share of their height are one
+#: word. Thai is written without spaces and a PDF breaks its text wherever it
+#: likes, so "ม.ค.68" arrives as five fragments whose boxes touch or overlap,
+#: while "20 มค 68" leaves a small but real gap at each space. The threshold
+#: sits between the two, which is tight: a space the file did not record - and
+#: these files drop the one in "ต้นตาล คล่องแคล่ว", whose boxes overlap - cannot
+#: be recovered here at all.
+_WORD_GAP = 0.06
+
+
+def _join(items) -> str:
+    """Put a cell's fragments back together as they were set on the page.
+
+    Two things have to be got right, and getting either wrong makes the cell
+    unparseable:
+
+    *Order.* A cell wraps - "Methylphenidate HCl tablets 10 mg" over two lines -
+    and its fragments have to be read line by line. Sorting them all by x alone
+    interleaves the lines into "tablets Methylphenidate HCl 10 mg".
+
+    *Spacing.* Joining every fragment with a space turns "3 ม.ค.68" into
+    "3 ม . ค .68" and "ด.ญ.พิมพ์" into "ด . ญ . พิมพ์"; joining with nothing
+    runs separate words together. The gap between two fragments says which was
+    meant, and the gap is in the boxes.
+    """
+    # A generous tolerance: everything here is inside one cell, so the only
+    # thing to separate is a genuine wrap, and the lines of a wrap are a whole
+    # row-height apart. The default would split "ม" from "." on a page that
+    # still carries a fraction of a degree of tilt.
+    lines = cluster_by_y(items, _CELL_LINE_TOLERANCE)
+    if not lines:
+        return ""
+    heights = sorted(box.bbox[3] - box.bbox[1] for box in items)
+    limit = (heights[len(heights) // 2] or 1.0) * _WORD_GAP
+
+    out: list[str] = []
+    for line in lines:
+        if out:
+            out.append(" ")  # a wrap is a word break
+        out.append(line[0].text)
+        for previous, box in zip(line, line[1:]):
+            gap = box.bbox[0] - previous.bbox[2]
+            out.append("" if gap <= limit else " ")
+            out.append(box.text)
+    return "".join(out)
 
 
 def _build_row(

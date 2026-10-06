@@ -33,6 +33,7 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
             "row_index",
             "form_code",
             "entry_date",
+            "entry_date_text",
             "generic_name",
             "trade_name",
             "batch_no",
@@ -91,11 +92,11 @@ class BalanceDocumentSerializer(serializers.ModelSerializer):
 class BalanceResultSerializer(BalanceDocumentSerializer):
     """The document with every row it produced.
 
-    ``entries`` is the agreed output: the sixteen columns of
-    ``ตัวอย่าง Colume.xlsx``, keyed by their headers and in their order, the
-    same values the workbook's first sheet carries. Only four of them exist on
-    these ledgers; the rest belong to a purchase-approval record and come back
-    empty - see ``workers/balance_export.py``.
+    ``entries`` is the agreed output: the twelve columns of
+    ``ฟอแมทตาราง OCR.xlsx``, keyed by their headings and in their order, the
+    same values the workbook's first sheet carries. Eleven of them come
+    straight off the form; ``ลำดับ`` is counted here - see
+    ``workers/balance_export.py``.
 
     ``ledger`` is the same rows as the document states them, with the figures
     and the review verdict that the sixteen columns have nowhere to put. A
@@ -109,4 +110,8 @@ class BalanceResultSerializer(BalanceDocumentSerializer):
         fields = BalanceDocumentSerializer.Meta.fields + ("entries", "ledger")
 
     def get_entries(self, document: BalanceDocument) -> list[dict]:
-        return [balance_export.output_row(entry) for entry in document.entries.all()]
+        rows = list(document.entries.all())
+        return [
+            balance_export.output_row(row, sequence)
+            for row, sequence in zip(rows, balance_export.sequences(rows))
+        ]

@@ -19,6 +19,7 @@ order and a signature read off a clean scan with
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ THAI_CAPABLE_LANGUAGES = frozenset({"th"})
 
 @dataclass(frozen=True, slots=True)
 class FormLayout:
-    """One form: its code, its columns in physical order, and its signature."""
+    """One form: its code, its columns in physical order, and how to spot it."""
 
     code: str
     title: str
@@ -81,6 +82,11 @@ class FormLayout:
     columns: tuple[str, ...]
     #: Relative column widths, each as a fraction of the table width.
     signature: tuple[float, ...]
+    #: Wording that only this form's printed title contains. Used when the page
+    #: carries its own text, which is both exact and immune to a scan that
+    #: stretched the table. Empty for the handwritten forms, whose titles no
+    #: engine here can read.
+    markers: tuple[str, ...] = ()
 
     def role_at(self, index: int | None) -> str | None:
         if index is None or not 0 <= index < len(self.columns):
@@ -153,7 +159,60 @@ RK_4 = FormLayout(
                0.082, 0.061, 0.061, 0.071, 0.082),
 )
 
-FORMS: tuple[FormLayout, ...] = (RVJ_7_4, BVJ_7_4_KP, RK_4)
+# --- วัตถุออกฤทธิ์ / ยาเสพติดให้โทษ ในประเภท ๒ ---------------------------
+#
+# A newer family, and a different one: these are typed rather than filled in by
+# hand, and the files carry their own text. They are identified by their printed
+# title, so their signatures are only the fallback for a copy that arrived as a
+# plain scan.
+
+BYS_2 = FormLayout(
+    code="บ.ย.ส. ๒/ว.จ. ๒-จ๑",
+    title="บัญชีจำหน่ายยาเสพติดให้โทษในประเภท ๒ หรือวัตถุออกฤทธิ์ในประเภท ๒",
+    columns=(
+        DATE,
+        GENERIC_NAME,
+        TRADE_NAME,
+        BATCH_NO,
+        RECEIVED_FROM,
+        ISSUED_TO,
+        RECIPIENT_ID,
+        BALANCE_BROUGHT,
+        RECEIVED,
+        ISSUED,
+        BALANCE,
+    ),
+    signature=(0.072, 0.126, 0.103, 0.070, 0.070, 0.132,
+               0.161, 0.064, 0.064, 0.064, 0.073),
+    markers=("บัญชีจำหน่ายยาเสพติดให้โทษในประเภท",),
+)
+
+RYS_2 = FormLayout(
+    code="ร.ย.ส. ๒/ว.จ. ๒-จ๑",
+    title="รายงานเกี่ยวกับการดำเนินกิจการจำหน่ายยาเสพติดให้โทษในประเภท ๒ "
+          "หรือวัตถุออกฤทธิ์ในประเภท ๒",
+    columns=(
+        DATE,
+        GENERIC_NAME,
+        TRADE_NAME,
+        BATCH_NO,
+        RECEIVED_FROM,
+        ISSUED_TO,
+        BALANCE_BROUGHT,
+        RECEIVED,
+        ISSUED,
+        BALANCE,
+        UNIT,
+        REMARK,
+    ),
+    signature=(0.066, 0.134, 0.132, 0.070, 0.061, 0.156,
+               0.062, 0.063, 0.063, 0.071, 0.051, 0.074),
+    # "รายงานเกี่ยวกับ" is spelt both with and without the tone mark across the
+    # sample, so the marker starts after it.
+    markers=("การดำเนินกิจการจำหน่ายยาเสพติด",),
+)
+
+FORMS: tuple[FormLayout, ...] = (RVJ_7_4, BVJ_7_4_KP, RK_4, BYS_2, RYS_2)
 
 #: Mean absolute difference per column, above which the page is not one of
 #: these forms. The same form reproduces to under 0.002; the closest pair of
@@ -161,11 +220,65 @@ FORMS: tuple[FormLayout, ...] = (RVJ_7_4, BVJ_7_4_KP, RK_4)
 _MAX_SIGNATURE_DISTANCE = 0.008
 
 
+#: Words that only ever appear in a table's printed column titles. Used to find
+#: where the header band ends on a page whose text can be read: the lowest of
+#: them is the last thing above the first entry. The horizontal rules cannot say
+#: this - a page may rule a note in its margin as heavily as its own table.
+HEADER_WORDS: tuple[str, ...] = (
+    "ยอดยกมา",
+    "คงเหลือ",
+    "ชื่อการค้า",
+    "ได้มาจาก",
+    "จำหน่ายให้",
+    "ครั้งที่ผลิต",
+    "ผู้รับยา",
+    "ที่ทางราชการออกให้",
+    "หมายเหตุ",
+    "ชื่อและความแรงของ",
+    "จ่ายไปให้",
+    "ชื่อผู้ผลิต",
+)
+
+
+#: PyMuPDF returns Thai SARA AM as its two parts, so "จำหน่าย" comes out as
+#: "จําหน่าย" and no literal comparison matches. Put back together before any.
+_SARA_AM = ("ํา", "ำ")
+
+
+def normalise(text: str) -> str:
+    """Thai text as it would be typed, with the layout's spacing removed."""
+    return re.sub(r"\s+", "", (text or "").replace(*_SARA_AM))
+
+
+def identify_by_title(texts) -> FormLayout | None:
+    """Return the form whose printed title appears in ``texts``, if any.
+
+    Preferred over the geometry whenever the page carries its own text: a title
+    is exact, while proportions can only be close, and a form the service has
+    never been shown is then rejected outright rather than matched to whichever
+    known layout happens to be nearest.
+
+    The markers are deliberately the form's *title*, not its code. The code -
+    "แบบ บ.ย.ส. ๒/ว.จ. ๒-จ๑" - also turns up inside the table, where one form
+    cites the other, and matching on it reads a ร.ย.ส. page as a บ.ย.ส. one.
+    """
+    page = normalise(" ".join(texts))
+    for form in FORMS:
+        if any(normalise(marker) in page for marker in form.markers):
+            log.debug(
+                "form identified by title",
+                extra={"step": "form_identify", "form": form.code},
+            )
+            return form
+    return None
+
+
 def identify(column_widths: list[float]) -> FormLayout:
     """Return the form whose column proportions best match the detected grid.
 
-    ``column_widths`` are absolute widths; they are normalised here so the
-    render dpi and the scanner's margins do not matter.
+    The fallback for a page with no text of its own - every handwritten scan.
+    ``column_widths`` are absolute; they are normalised here so the render dpi
+    and the scanner's margins do not matter.
     """
     total = sum(column_widths)
     if total <= 0:

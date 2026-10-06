@@ -182,9 +182,16 @@ def clean_batch_no(text: str) -> tuple[str, bool]:
     return prefix.upper() + re.sub(r"\s+", "", digits), True
 
 
+#: PyMuPDF returns Thai SARA AM (ำ) as its two parts, NIKHAHIT + SARA AA, so
+#: "จำนวน" comes out of a PDF as "จํานวน". It looks almost identical and
+#: compares as different, which breaks every lookup and reads oddly in the
+#: output, so it is put back together on the way in.
+_SARA_AM = ("ํา", "ำ")
+
+
 def clean_text(text: str) -> str:
-    """Collapse the whitespace left by joining several OCR boxes into one cell."""
-    return re.sub(r"\s+", " ", (text or "").strip())
+    """Collapse the whitespace left by joining several boxes into one cell."""
+    return re.sub(r"\s+", " ", (text or "").replace(*_SARA_AM).strip())
 
 
 #: Latin letters, digits and the punctuation a drug name uses. A cell made

@@ -32,14 +32,16 @@ def _row(page=1, index=0, **cells):
     row = LedgerRow(
         page_number=page,
         row_index=index,
-        form_code="ร.ค.-๔",
+        form_code="บ.ย.ส. ๒/ว.จ. ๒-จ๑",
         cells={
-            form_layout.GENERIC_NAME: "Lorazepam 1 mg",
-            form_layout.TRADE_NAME: "Lorazep",
-            form_layout.BATCH_NO: "T25275",
+            form_layout.DATE: "5 มค 68",
+            form_layout.GENERIC_NAME: "Methylphenidate HCl tablets 10 mg",
+            form_layout.TRADE_NAME: "Ritalin tablets 10 mg",
+            form_layout.BATCH_NO: "BE210",
+            form_layout.RECIPIENT_ID: "1112223334440",
             **cells,
         },
-        entry_date=dt.date(2026, 3, 1),
+        entry_date=dt.date(2025, 1, 5),
         confidence=0.88,
     )
     row.quantities = {
@@ -54,7 +56,15 @@ def _row(page=1, index=0, **cells):
 def _result(rows=None):
     return DocumentResult(
         rows=rows if rows is not None else [_row(), _row(index=1)],
-        pages=[PageOutcome(page_number=1, form_code="ร.ค.-๔", rows=2, confidence=0.8)],
+        pages=[
+            PageOutcome(
+                page_number=1,
+                form_code="บ.ย.ส. ๒/ว.จ. ๒-จ๑",
+                rows=2,
+                confidence=1.0,
+                source="TEXT_LAYER",
+            )
+        ],
         page_count=1,
         processing_ms=1234,
     )
@@ -83,65 +93,73 @@ class TestSubmit:
         assert body["status"] == DocumentStatus.COMPLETED
         assert body["entry_count"] == 2
         assert len(body["entries"]) == 2
-        assert body["entries"][0]["ProductGenericName"] == "Lorazepam 1 mg"
+        name = body["entries"][0]["ชื่อ/ความแรงของวัตถุออกฤทธิ์"]
+        assert name == "Methylphenidate HCl tablets 10 mg"
 
 
 class TestAgreedColumns:
-    """``entries`` is the sixteen columns of ตัวอย่าง Colume.xlsx, in order.
+    """``entries`` is the twelve columns of ฟอแมทตาราง OCR.xlsx, in order.
 
     Asserted literally rather than against the module that produces them, so a
-    change to the agreed shape has to be made deliberately in two places.
+    change to the agreed shape has to be made deliberately in two places. The
+    keys carry the line breaks the format's headings are set with.
     """
 
     EXPECTED = [
-        "เลขที่คำขอซื้อ",
-        "ProductGenericName",
-        "ProductTradeName",
-        "ประเภทวัตุถเสพติด",
-        "เลขที่ใบอนุญาต",
-        "จำนวนที่ขอซื้อ",
-        "จำนวนที่อนุมัติ",
-        "ยอดเงินที่อนุมัติ",
-        "วันที่สร้าง",
-        "วันที่อนุมัติ",
-        "ชื่อสถานพยาบาล",
-        "ที่ตั้ง",
-        "จังหวัด",
-        "ผู้ดำเนินกิจการ",
-        "เลขที่ใบแจ้งหนี้/ใบเสร็จ",
-        "วันที่ออกใบแจ้งหนี้/ใบเสร็จ",
+        "ลำดับ",
+        "วัน\nเดือน\nปี",
+        "ชื่อ/ความแรงของวัตถุออกฤทธิ์",
+        "ชื่อการค้า",
+        "เลขที่/รุ่นที่/\nครั้งที่ผลิต",
+        "ได้มาจาก",
+        "ชื่อ-นามสกุล\nผู้รับยา",
+        "เลขที่บัตรประจำตัวประชาชน/\nหนังสือเดินทาง/บัตรประจำตัวอื่น\n"
+        "ที่ทางราชการออกให้",
+        "ยกมา",
+        "รับ",
+        "จ่าย",
+        "คงเหลือ",
     ]
 
     def test_every_entry_has_exactly_those_keys_in_that_order(self, client):
         for entry in _upload(client).json()["entries"]:
             assert list(entry) == self.EXPECTED
 
-    def test_fills_the_four_columns_the_forms_supply(self, client):
+    def test_carries_what_the_form_says(self, client):
         entry = _upload(client).json()["entries"][0]
-        assert entry["ProductGenericName"] == "Lorazepam 1 mg"
-        assert entry["ProductTradeName"] == "Lorazep"
-        assert entry["ประเภทวัตุถเสพติด"] == balance_export.SUBSTANCE_TYPE
-        assert entry["วันที่สร้าง"] == "2026-03-01"
+        assert entry["ลำดับ"] == 1
+        assert entry["วัน\nเดือน\nปี"] == "5 มค 68"
+        assert entry["ชื่อ/ความแรงของวัตถุออกฤทธิ์"] == (
+            "Methylphenidate HCl tablets 10 mg"
+        )
+        assert entry["ชื่อการค้า"] == "Ritalin tablets 10 mg"
+        assert entry["เลขที่/รุ่นที่/\nครั้งที่ผลิต"] == "BE210"
 
-    def test_leaves_the_purchase_approval_columns_empty(self, client):
+    def test_carries_the_four_quantities(self, client):
         entry = _upload(client).json()["entries"][0]
-        empty = set(self.EXPECTED) - {
-            "ProductGenericName",
-            "ProductTradeName",
-            "ประเภทวัตุถเสพติด",
-            "วันที่สร้าง",
-        }
-        for column in empty:
-            assert entry[column] in ("", None), column
+        assert entry["ยกมา"] == 450
+        assert entry["รับ"] is None  # a dash on the form
+        assert entry["จ่าย"] == 40
+        assert entry["คงเหลือ"] == 410
+
+    def test_the_sequence_restarts_at_each_new_form(self, client):
+        second = _row(index=1)
+        second.form_code = "ร.ย.ส. ๒/ว.จ. ๒-จ๑"
+        response = _upload(client, result=_result([_row(), second]))
+        assert [e["ลำดับ"] for e in response.json()["entries"]] == [1, 1]
 
     def test_the_api_and_the_workbook_agree(self, client):
-        # Both are built from workers.balance_export, so they cannot drift.
+        # Both are built from workers.balance_export, so they cannot drift. The
+        # workbook's header is two rows and merged, so the sub-headings - which
+        # are what the JSON keys use - are read from the second.
         document_id = _upload(client).json()["document_id"]
-        workbook = load_workbook(
+        sheet = load_workbook(
             io.BytesIO(client.get(f"{URL}/{document_id}/export.xlsx").content)
-        )
-        header = [c.value for c in next(workbook["Output"].iter_rows(max_row=1))]
-        assert header == self.EXPECTED
+        )["Output"]
+        top = [c.value for c in next(sheet.iter_rows(max_row=1))]
+        sub = [c.value for c in next(sheet.iter_rows(min_row=2, max_row=2))]
+        headings = [s or t for t, s in zip(top, sub)]
+        assert headings == self.EXPECTED
 
 
 class TestLedgerDetail:
@@ -153,7 +171,7 @@ class TestLedgerDetail:
         assert row["received"] is None  # a dash on the form
         assert row["issued"] == 40
         assert row["balance"] == 410
-        assert row["batch_no"] == "T25275"
+        assert row["batch_no"] == "BE210"
         assert "needs_review" in row and "review_notes" in row
 
     def test_lines_up_one_for_one_with_entries(self, client):
@@ -167,8 +185,15 @@ class TestLedgerDetail:
     def test_keeps_the_per_page_outcome(self, client):
         summary = _upload(client).json()["page_summary"]
         assert summary == [
-            {"page": 1, "form": "ร.ค.-๔", "rows": 2, "skew": 0.0,
-             "confidence": 0.8, "error": ""}
+            {
+                "page": 1,
+                "form": "บ.ย.ส. ๒/ว.จ. ๒-จ๑",
+                "rows": 2,
+                "skew": 0.0,
+                "source": "TEXT_LAYER",
+                "confidence": 1.0,
+                "error": "",
+            }
         ]
 
     def test_stores_the_uploader(self, client):
@@ -257,3 +282,49 @@ class TestReprocess:
     def test_unknown_document_is_404(self, client):
         response = client.post(f"{URL}/00000000-0000-0000-0000-000000000000/reprocess")
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+class TestPrettyOutput:
+    """``?pretty`` indents the answer so a person can read it.
+
+    The default is one line with no spaces, which is right for a caller and
+    useless the moment somebody opens the file to check what came back.
+    """
+
+    def test_the_default_is_compact(self, client):
+        body = _upload(client).content.decode("utf-8")
+        assert "\n" not in body
+
+    def test_pretty_indents_and_keeps_thai_readable(self, client):
+        with mock.patch(
+            "apps.balance.services._extract", return_value=_result()
+        ):
+            response = client.post(
+                f"{URL}?pretty",
+                {"file": SimpleUploadedFile("ledger.pdf", PDF_BYTES, "application/pdf")},
+            )
+        body = response.content.decode("utf-8")
+        assert body.count("\n") > 20
+        # Thai as itself, not as \uXXXX escapes.
+        assert "บ.ย.ส. ๒/ว.จ. ๒-จ๑" in body
+
+    def test_pretty_changes_nothing_but_the_spacing(self, client):
+        plain = _upload(client).json()
+        with mock.patch(
+            "apps.balance.services._extract", return_value=_result()
+        ):
+            pretty = client.post(
+                f"{URL}?pretty",
+                {"file": SimpleUploadedFile("ledger.pdf", PDF_BYTES, "application/pdf")},
+            ).json()
+        assert plain["entries"] == pretty["entries"]
+
+    def test_any_value_turns_it_on(self, client):
+        with mock.patch(
+            "apps.balance.services._extract", return_value=_result()
+        ):
+            response = client.post(
+                f"{URL}?pretty=0",
+                {"file": SimpleUploadedFile("ledger.pdf", PDF_BYTES, "application/pdf")},
+            )
+        assert "\n" in response.content.decode("utf-8")

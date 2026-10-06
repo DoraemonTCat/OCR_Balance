@@ -1,9 +1,10 @@
 """The workbook handed back to the caller.
 
-The first sheet's header row is the contract - it has to equal
-``ตัวอย่าง Colume.xlsx`` exactly, including the customer's spelling of
-"ประเภทวัตุถเสพติด" - so it is asserted literally rather than derived from the
-module under test.
+The first sheet's header is the contract - two rows, with ``จำหน่ายให้`` merged
+over its two sub-columns and ``จำนวน`` over its four, exactly as
+``ฟอแมทตาราง OCR.xlsx`` sets them out. It is asserted literally rather than
+derived from the module under test, so changing the agreed shape takes a
+deliberate edit in both places.
 """
 import datetime as dt
 import io
@@ -15,38 +16,58 @@ from workers import balance_export, form_layout
 from workers.balance_parser import LedgerRow
 from workers.balance_pipeline import PageOutcome
 
-EXPECTED_HEADER = [
-    "เลขที่คำขอซื้อ",
-    "ProductGenericName",
-    "ProductTradeName",
-    "ประเภทวัตุถเสพติด",
-    "เลขที่ใบอนุญาต",
-    "จำนวนที่ขอซื้อ",
-    "จำนวนที่อนุมัติ",
-    "ยอดเงินที่อนุมัติ",
-    "วันที่สร้าง",
-    "วันที่อนุมัติ",
-    "ชื่อสถานพยาบาล",
-    "ที่ตั้ง",
-    "จังหวัด",
-    "ผู้ดำเนินกิจการ",
-    "เลขที่ใบแจ้งหนี้/ใบเสร็จ",
-    "วันที่ออกใบแจ้งหนี้/ใบเสร็จ",
+#: The first header row as a reader gets it back: a merged span keeps its text
+#: in its top-left cell and reports None for the rest, which is exactly how
+#: ``ฟอแมทตาราง OCR.xlsx`` itself reads.
+EXPECTED_TOP = [
+    "ลำดับ",
+    "วัน\nเดือน\nปี",
+    "ชื่อ/ความแรงของวัตถุออกฤทธิ์",
+    "ชื่อการค้า",
+    "เลขที่/รุ่นที่/\nครั้งที่ผลิต",
+    "ได้มาจาก",
+    "จำหน่ายให้",
+    None,
+    "จำนวน",
+    None,
+    None,
+    None,
 ]
+
+EXPECTED_SUB = [
+    None, None, None, None, None, None,
+    "ชื่อ-นามสกุล\nผู้รับยา",
+    "เลขที่บัตรประจำตัวประชาชน/\nหนังสือเดินทาง/บัตรประจำตัวอื่น\n"
+    "ที่ทางราชการออกให้",
+    "ยกมา",
+    "รับ",
+    "จ่าย",
+    "คงเหลือ",
+]
+
+#: How the two header rows are merged: each single-heading column down over
+#: both rows, each shared heading across its sub-columns.
+EXPECTED_MERGES = {
+    "A1:A2", "B1:B2", "C1:C2", "D1:D2", "E1:E2", "F1:F2", "G1:H1", "I1:L1",
+}
+
 
 
 def _row():
     row = LedgerRow(
         page_number=4,
         row_index=0,
-        form_code="ร.ค.-๔",
+        form_code="บ.ย.ส. ๒/ว.จ. ๒-จ๑",
         cells={
-            form_layout.GENERIC_NAME: "Lorazepam 1 mg",
-            form_layout.TRADE_NAME: "Lorazep",
-            form_layout.BATCH_NO: "T25275",
-            form_layout.ISSUED_TO: "t@on SunScQ",
+            form_layout.DATE: "5 มค 68",
+            form_layout.GENERIC_NAME: "Methylphenidate HCl tablets 10 mg",
+            form_layout.TRADE_NAME: "Ritalin tablets 10 mg",
+            form_layout.BATCH_NO: "BE210",
+            form_layout.RECEIVED_FROM: "อย",
+            form_layout.ISSUED_TO: "ด.ญ.พิมพ์ เก่งการดี",
+            form_layout.RECIPIENT_ID: "1112223334440",
         },
-        entry_date=dt.date(2026, 3, 1),
+        entry_date=dt.date(2025, 1, 5),
         confidence=0.88,
     )
     row.quantities = {
@@ -62,33 +83,68 @@ def _row():
 def _workbook(rows=None, pages=None):
     payload = balance_export.build(
         rows if rows is not None else [_row()],
-        pages if pages is not None else [PageOutcome(page_number=4, form_code="ร.ค.-๔", rows=1)],
+        pages
+        if pages is not None
+        else [PageOutcome(page_number=4, form_code="บ.ย.ส. ๒/ว.จ. ๒-จ๑", rows=1)],
     )
     return load_workbook(io.BytesIO(payload))
+
+
+def _values(sheet, row=3):
+    """One data row. The data starts at row 3: the header takes two."""
+    return list(next(sheet.iter_rows(min_row=row, max_row=row, values_only=True)))
 
 
 class OutputSheetTests(SimpleTestCase):
     def test_header_matches_the_agreed_columns_exactly(self):
         sheet = _workbook()["Output"]
-        header = [cell.value for cell in next(sheet.iter_rows(max_row=1))]
-        self.assertEqual(header, EXPECTED_HEADER)
+        top = [cell.value for cell in next(sheet.iter_rows(max_row=1))]
+        sub = [c.value for c in next(sheet.iter_rows(min_row=2, max_row=2))]
+        self.assertEqual(top, EXPECTED_TOP)
+        # A merged cell reads back as None below its top-left corner, so the
+        # second row carries only the sub-headings.
+        self.assertEqual([value or None for value in sub], EXPECTED_SUB)
 
-    def test_one_row_per_entry(self):
-        self.assertEqual(_workbook()["Output"].max_row, 2)
+    def test_the_header_spans_are_merged_as_the_format_sets_them(self):
+        sheet = _workbook()["Output"]
+        self.assertEqual({str(span) for span in sheet.merged_cells.ranges}, EXPECTED_MERGES)
 
-    def test_fills_the_four_columns_the_forms_supply(self):
-        values = list(next(_workbook()["Output"].iter_rows(min_row=2, values_only=True)))
-        self.assertEqual(values[1], "Lorazepam 1 mg")
-        self.assertEqual(values[2], "Lorazep")
-        self.assertEqual(values[3], balance_export.SUBSTANCE_TYPE)
-        # openpyxl reads any date cell back as a datetime.
-        self.assertEqual(values[8].date(), dt.date(2026, 3, 1))
+    def test_one_row_per_entry_below_the_two_header_rows(self):
+        self.assertEqual(_workbook()["Output"].max_row, 3)
 
-    def test_leaves_the_purchase_approval_columns_empty(self):
-        # These twelve belong to a different record and are not guessed at.
-        values = list(next(_workbook()["Output"].iter_rows(min_row=2, values_only=True)))
-        for index in (0, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15):
-            self.assertIn(values[index], ("", None), f"column {index + 1} was filled")
+    def test_carries_what_the_form_says(self):
+        values = _values(_workbook()["Output"])
+        self.assertEqual(values[0], 1)                              # ลำดับ
+        self.assertEqual(values[1], "5 มค 68")                      # วัน เดือน ปี
+        self.assertEqual(values[2], "Methylphenidate HCl tablets 10 mg")
+        self.assertEqual(values[3], "Ritalin tablets 10 mg")
+        self.assertEqual(values[4], "BE210")
+        self.assertEqual(values[5], "อย")
+        self.assertEqual(values[6], "ด.ญ.พิมพ์ เก่งการดี")
+        self.assertEqual(values[7], "1112223334440")
+
+    def test_carries_the_four_quantities(self):
+        values = _values(_workbook()["Output"])
+        self.assertEqual(values[8], 450)    # ยกมา
+        self.assertIsNone(values[9])        # รับ - a dash on the form
+        self.assertEqual(values[10], 40)    # จ่าย
+        self.assertEqual(values[11], 410)   # คงเหลือ
+
+    def test_the_date_is_the_cell_not_a_date_value(self):
+        # "3-31 ม.ค. 68" is a month of dispensing on one line, which no date can
+        # hold; the column carries what the form writes.
+        row = _row()
+        row.cells[form_layout.DATE] = "3-31 ม.ค. 68"
+        row.entry_date = None
+        self.assertEqual(_values(_workbook(rows=[row])["Output"])[1], "3-31 ม.ค. 68")
+
+    def test_the_sequence_restarts_at_each_new_form(self):
+        first, second = _row(), _row()
+        second.form_code = "ร.ย.ส. ๒/ว.จ. ๒-จ๑"
+        third = _row()
+        third.form_code = "ร.ย.ส. ๒/ว.จ. ๒-จ๑"
+        sheet = _workbook(rows=[first, second, third])["Output"]
+        self.assertEqual([_values(sheet, r)[0] for r in (3, 4, 5)], [1, 1, 2])
 
 
 class LedgerSheetTests(SimpleTestCase):
@@ -127,6 +183,6 @@ class PageSheetTests(SimpleTestCase):
 class EmptyDocumentTests(SimpleTestCase):
     def test_a_document_with_no_rows_still_produces_the_header(self):
         sheet = _workbook(rows=[], pages=[])["Output"]
-        header = [cell.value for cell in next(sheet.iter_rows(max_row=1))]
-        self.assertEqual(header, EXPECTED_HEADER)
-        self.assertEqual(sheet.max_row, 1)
+        top = [cell.value for cell in next(sheet.iter_rows(max_row=1))]
+        self.assertEqual(top, EXPECTED_TOP)
+        self.assertEqual(sheet.max_row, 2)

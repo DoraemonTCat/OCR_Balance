@@ -1,14 +1,19 @@
-"""Pre-checks on a submitted PDF, and the box type the OCR engine returns.
+"""Pre-checks on a submitted PDF, and reading the text a page already carries.
 
 Everything that opens a PDF is behind ``inspect``: it is the one place that
 decides a file is unusable, and it does so before any page is rendered or any
 model is loaded, so a corrupt or password-protected upload costs nothing.
 
-Rendering the pages is ``balance_pipeline``'s job, not this module's. These
-documents are scans with no text layer, so there is no text-extraction path
-here - ``inspect`` only *reports* whether a text layer exists, because a
-document that has one is not the kind of document this service is for and the
-operator should know.
+``text_boxes`` is the other half. Submissions arrive in two kinds:
+
+* A **searchable** PDF - typed, or scanned and already run through an OCR that
+  embedded its result. The text is in the file, correct, Thai included, with the
+  position of every fragment. Nothing this service can do will read it better.
+* A **scan** of a form filled in by hand, which carries no text at all and has
+  to go through ``ocr_engine``.
+
+Both end up as the same ``TextLine`` boxes in the same pixel coordinates, so
+``balance_parser`` never learns which kind it was given.
 """
 from __future__ import annotations
 
@@ -129,3 +134,55 @@ def inspect(path: Path) -> PdfMetadata:
         )
     finally:
         document.close()
+
+
+# --- the text a page already carries ---------------------------------------
+
+#: PDF user space is 72 units to the inch; a page rendered at ``dpi`` is that
+#: many pixels to the inch. Boxes are scaled by the ratio so they land on the
+#: same grid the rendered image was measured on.
+_PDF_UNITS_PER_INCH = 72.0
+
+#: A page with fewer text fragments than this inside it is treated as a scan,
+#: whatever stray marks the file may carry. A real page of these forms has the
+#: printed headings alone well past it.
+MIN_SPANS_FOR_TEXT_LAYER = 20
+
+
+def has_usable_text(page) -> bool:
+    """Whether this page's own text is worth reading instead of OCR-ing it."""
+    return len(page.get_text("text").strip()) >= MIN_TEXT_CHARS_PER_PAGE
+
+
+def text_boxes(page, dpi: int) -> list[TextLine]:
+    """The page's embedded text as boxes, in the pixels of a ``dpi`` render.
+
+    One box per span, not per line: a span is already the unit the PDF breaks
+    text at, and the parser places each box in a column by where it sits, so
+    splitting further is unnecessary and joining first would merge cells.
+
+    Confidence is 1.0 throughout. The text is not a reading of the page, it is
+    the page, and the review flags downstream are about what could not be read.
+    """
+    scale = dpi / _PDF_UNITS_PER_INCH
+    boxes: list[TextLine] = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:  # 0 = text
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                text = (span.get("text") or "").strip()
+                if not text:
+                    continue
+                x0, y0, x1, y1 = span["bbox"]
+                boxes.append(
+                    TextLine(
+                        text=text,
+                        bbox=(x0 * scale, y0 * scale, x1 * scale, y1 * scale),
+                        confidence=1.0,
+                        size=span.get("size"),
+                        bold=bool(span.get("flags", 0) & 16),
+                    )
+                )
+    boxes.sort(key=lambda box: (round(box.top, 1), box.x0))
+    return boxes

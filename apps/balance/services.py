@@ -154,6 +154,7 @@ def _entry(document: BalanceDocument, row) -> BalanceEntry:
         row_index=row.row_index,
         form_code=row.form_code,
         entry_date=row.entry_date,
+        entry_date_text=cells.get(form_layout.DATE, "")[:60],
         generic_name=cells.get(form_layout.GENERIC_NAME, ""),
         trade_name=cells.get(form_layout.TRADE_NAME, ""),
         batch_no=cells.get(form_layout.BATCH_NO, "")[:100],
