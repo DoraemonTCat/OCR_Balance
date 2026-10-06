@@ -20,16 +20,30 @@ X_RULES = [114, 208, 454, 626, 832, 1000, 1233, 1593, 1752, 1892, 2032, 2172, 22
 
 
 class _Line:
-    """Stands in for ``pdf_extractor.TextLine``."""
+    """Stands in for ``pdf_extractor.TextLine``.
+
+    ``order`` is reading order, which the parser uses to put a cell's fragments
+    back together. A recognised page numbers its boxes top-to-bottom and
+    left-to-right, so ``_Page`` assigns it the same way rather than making every
+    test spell it out.
+    """
 
     def __init__(self, text, x, y, width=120, height=45, confidence=0.9):
         self.text = text
         self.bbox = (float(x), float(y), float(x + width), float(y + height))
         self.confidence = confidence
+        self.order = 0
 
 
 class _Page:
     def __init__(self, lines):
+        # Number the boxes the way the OCR engine does: top to bottom, left to
+        # right. Nothing in a test has to think about it unless it is the thing
+        # being tested.
+        for index, line in enumerate(
+            sorted(lines, key=lambda b: (round(b.bbox[1], 1), b.bbox[0]))
+        ):
+            line.order = index
         self.lines = lines
         self.confidence = 0.8
 
@@ -284,3 +298,72 @@ class NameTests(SimpleTestCase):
     def test_a_misread_drug_name_still_counts(self):
         for name in ("Lorazepam", "Loraztpqm", "Lorsztpam L"):
             self.assertTrue(balance_parser._looks_like_a_name(name), name)
+
+
+class RuledRowsTests(SimpleTestCase):
+    """Where the table rules its rows, the rules decide where they end.
+
+    A drug name runs onto a second line well below its own figures. The halfway
+    point between two rows of figures falls between those two lines, so with
+    nothing but the figures to go on the continuation is handed to the entry
+    below: one row loses half its name and the next gains a name it never had.
+    """
+
+    #: A row rule under each entry, as the typed ประเภท ๒ forms have.
+    ROW_RULES = (800, 900, 1000)
+
+    def _ruled_image(self):
+        import cv2
+
+        page = _form_image()
+        for y in self.ROW_RULES:
+            cv2.line(page, (X_RULES[0], y), (X_RULES[-1], y), (0, 0, 0), 3)
+        return page
+
+    def _lines(self):
+        # Two entries. The first one's name wraps to a second line that sits
+        # below the midpoint between the two rows of figures.
+        return [
+            _Line("Methylphenidate HCl", _center(1), 815, height=40),
+            _Line("tablets 10 mg", _center(1), 865, height=40),
+            _Line("2,400", _center(7), 820, height=40),
+            _Line("2,400", _center(10), 820, height=40),
+            _Line("30", _center(9), 920, height=40),
+            _Line("2,370", _center(10), 920, height=40),
+        ]
+
+    def _parse_ruled(self, lines):
+        page = _Page(lines)
+        return parse_page(self._ruled_image(), 2, lambda image: page)
+
+    def test_a_wrapped_name_stays_with_its_own_entry(self):
+        rows = self._parse_ruled(self._lines()).rows
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            rows[0].get(form_layout.GENERIC_NAME), "Methylphenidate HCl tablets 10 mg"
+        )
+        self.assertEqual(rows[1].get(form_layout.GENERIC_NAME), "")
+
+    def test_the_figures_still_land_on_their_own_rows(self):
+        rows = self._parse_ruled(self._lines()).rows
+        self.assertEqual(rows[0].quantities[form_layout.BALANCE], 2400)
+        self.assertEqual(rows[1].quantities[form_layout.BALANCE], 2370)
+
+
+class DateColumnAcceptanceTests(SimpleTestCase):
+    def test_a_line_dated_by_a_period_is_still_an_entry(self):
+        # "3-31 ม.ค. 68" summarises a month of dispensing. It is not a date, its
+        # name belongs to the entry above, and it carries one figure - so only
+        # the date column says it is a row at all.
+        lines = [
+            _Line("3-31 ม.ค. 68", _center(0), 900),
+            _Line("98", _center(10), 900),
+        ]
+        rows = _parse(lines).rows
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].quantities[form_layout.BALANCE], 98)
+        self.assertIsNone(rows[0].entry_date)
+
+    def test_the_total_line_is_still_refused(self):
+        # No date, no name, one closing figure.
+        self.assertEqual(_parse([_Line("390", _center(10), 1180)]).rows, [])

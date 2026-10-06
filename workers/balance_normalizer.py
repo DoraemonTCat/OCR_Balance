@@ -53,16 +53,50 @@ def clean_quantity(text: str) -> tuple[int | None, bool]:
     if raw in _DASH:
         return None, True
 
-    # Spaces and commas inside a number are the writer's grouping or the
+    # The unit is written under the figure in the same column on the ประเภท ๒
+    # forms - "2,400" with "เม็ด" below it - so a quantity cell can hold a word
+    # as well as a number. Only a Thai word is dropped: that is a unit, and a
+    # cell is not unreadable because it says what it counts. A Latin one is the
+    # recogniser failing, and has to keep the cell unreadable.
+    #
+    # Glyphs are substituted before this, not after: "9 9 b" is 996 with a
+    # misread 6, and testing for digits first would throw the 6 away as a word.
+    words = [
+        word
+        for word in re.split(r"\s+", raw.translate(_DIGIT_CONFUSIONS))
+        if word and not _is_unit(word)
+    ]
+    if not any(any(char.isdigit() for char in word) for word in words):
+        return None, False
+
+    # Spaces and commas *inside* a number are the writer's grouping or the
     # recogniser splitting one numeral, never a separator between two values:
     # a quantity cell holds exactly one figure.
-    compact = re.sub(r"[\s,.]", "", raw)
-    translated = compact.translate(_DIGIT_CONFUSIONS)
+    compact = re.sub(r"[\s,.]", "", "".join(words))
+    translated = compact
 
     if translated.isdigit():
-        # Clean only if nothing had to be substituted; otherwise it is a guess.
-        return int(translated), compact.isdigit()
+        # Certain only if nothing had to be substituted to get there. Compared
+        # on the words that were kept, so dropping a unit does not make the
+        # figure beside it a guess.
+        untouched = re.sub(
+            r"[\s,.]",
+            "",
+            "".join(word for word in re.split(r"\s+", raw) if not _is_unit(word)),
+        )
+        return int(translated), untouched.isdigit()
     return None, False
+
+
+#: A word with no digits in it is the unit written beside the figure - these
+#: forms put "เม็ด" or "ขวด" in the quantity column - as long as it is not
+#: written in Latin script. Latin letters there are the recogniser failing.
+_LATIN = re.compile(r"[A-Za-z]")
+
+
+def _is_unit(word: str) -> bool:
+    """True for a word that is neither a figure nor the recogniser failing."""
+    return not any(char.isdigit() for char in word) and not _LATIN.search(word)
 
 
 def normalise_digits(text: str) -> str:

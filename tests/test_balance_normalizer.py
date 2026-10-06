@@ -117,3 +117,18 @@ class ThaiDateTests(SimpleTestCase):
 
     def test_a_mangled_cell_is_refused_rather_than_guessed(self):
         self.assertEqual(norm.clean_thai_date("3คม.68.")[0], None)
+
+
+class UnitInTheQuantityCellTests(SimpleTestCase):
+    """The ประเภท ๒ forms write the unit under the figure, same column."""
+
+    def test_the_unit_does_not_make_the_cell_unreadable(self):
+        self.assertEqual(norm.clean_quantity("2,400 เม็ด"), (2400, True))
+        self.assertEqual(norm.clean_quantity("1,000 ขวด"), (1000, True))
+
+    def test_a_cell_with_only_a_unit_has_no_figure(self):
+        self.assertEqual(norm.clean_quantity("เม็ด"), (None, False))
+
+    def test_a_correction_is_still_two_figures(self):
+        # Dropping the word must not also drop the second number.
+        self.assertTrue(norm.holds_two_figures("39 o 410"))

@@ -72,6 +72,13 @@ class TextLine:
     confidence: float | None = None
     size: float | None = None
     bold: bool = False
+    #: Reading order, set by whoever produced the box. Within one cell the
+    #: fragments are put back together in this order rather than by position:
+    #: a searchable PDF stores them in the order they are meant to be read, and
+    #: that is more reliable than their coordinates - the Thai prefix of a name
+    #: comes back with its glyphs at descending y, which sorts into "พิมพ์.เก่ง
+    #: การดี ญด." rather than "ด.ญ.พิมพ์ เก่งการดี".
+    order: int = 0
 
     @property
     def x0(self) -> float:
@@ -155,6 +162,11 @@ def text_boxes(page, dpi: int) -> list[TextLine]:
     text at, and the parser places each box in a column by where it sits, so
     splitting further is unnecessary and joining first would merge cells.
 
+    The boxes keep the order the file stores them in, which for a searchable
+    PDF is reading order. They are deliberately *not* sorted by position: the
+    coordinates of a span can be wrong where its text is not, and on these
+    files they are - see ``TextLine.order``.
+
     Confidence is 1.0 throughout. The text is not a reading of the page, it is
     the page, and the review flags downstream are about what could not be read.
     """
@@ -176,7 +188,7 @@ def text_boxes(page, dpi: int) -> list[TextLine]:
                         confidence=1.0,
                         size=span.get("size"),
                         bold=bool(span.get("flags", 0) & 16),
+                        order=len(boxes),
                     )
                 )
-    boxes.sort(key=lambda box: (round(box.top, 1), box.x0))
     return boxes

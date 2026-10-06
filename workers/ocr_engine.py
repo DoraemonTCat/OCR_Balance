@@ -125,7 +125,11 @@ def recognize_image(image, page_number: int = 0) -> OcrPage:
             )
             confidences.append(float(confidence))
 
+    # Recognised boxes carry no order of their own, so reading order is the
+    # geometric one; the parser then treats both kinds of box the same way.
     lines.sort(key=lambda item: (round(item.top, 1), item.x0))
+    for index, line in enumerate(lines):
+        line.order = index
     page_confidence = (
         round(sum(confidences) / len(confidences), 4) if confidences else None
     )

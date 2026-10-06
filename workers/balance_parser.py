@@ -247,10 +247,17 @@ _ANCHOR_TOLERANCE = 0.8
 def _row_bands(boxes, grid: Grid, form: FormLayout) -> list[list]:
     """Split the table's boxes into one list per entry.
 
-    The row boundaries come from the anchor cells; every other box - the drug
-    name and its wrapped continuation, the recipient, the remark - is then put
-    in the row whose band contains it. Boxes above the first anchor are the
-    printed header and are dropped.
+    Rows are bounded by the table's own horizontal rules where it has them, and
+    by the anchor cells where it does not. The two kinds of document here differ in
+    exactly that: the typed ประเภท ๒ forms rule a line under every entry, while
+    the handwritten ones leave the data area open.
+
+    Using the rules matters most for a cell that wraps. The drug name runs to a
+    second line well below its own figures - "Methylphenidate HCl" on one line
+    and "tablets 10 mg" on the next - and the halfway point between two rows of
+    figures falls between those two lines, so the continuation is handed to the
+    entry below: one row loses half its name and the next gains a name it never
+    had. The rule under the entry is where the row actually ends.
     """
     anchors = [
         box
@@ -265,28 +272,17 @@ def _row_bands(boxes, grid: Grid, form: FormLayout) -> list[list]:
     if not bands:
         return []
 
-    centers = [
-        sum((box.bbox[1] + box.bbox[3]) / 2 for box in band) / len(band)
-        for band in bands
-    ]
-    # A row owns the space down to halfway to the next row's centre. Above the
-    # first centre the band is closed off at half a row's height, so the printed
-    # header does not get swept into the first entry.
-    spacing = (
-        (centers[-1] - centers[0]) / (len(centers) - 1) if len(centers) > 1 else None
-    )
-    edges = [
-        centers[0] - (spacing / 2 if spacing else (centers[0] - grid.top))
-    ]
-    edges += [(centers[i] + centers[i + 1]) / 2 for i in range(len(centers) - 1)]
-    edges.append(grid.bottom)
+    edges = _ruled_edges(grid, bands) or _anchor_edges(grid, bands)
+    # Everything above the first row's top edge is the printed header, however
+    # far down the page its wrapped headings reach.
+    top = edges[0]
 
-    rows: list[list] = [[] for _ in centers]
+    rows: list[list] = [[] for _ in bands]
     for box in boxes:
-        if box.bbox[3] <= grid.header_bottom:
-            continue  # a printed column title, not anybody's entry
         center = (box.bbox[1] + box.bbox[3]) / 2
-        for index in range(len(centers)):
+        if center < top:
+            continue
+        for index in range(len(bands)):
             if edges[index] <= center < edges[index + 1]:
                 rows[index].append(box)
                 break
@@ -294,6 +290,46 @@ def _row_bands(boxes, grid: Grid, form: FormLayout) -> list[list]:
     for row in rows:
         row.sort(key=lambda box: box.bbox[0])
     return rows
+
+
+def _ruled_edges(grid: Grid, bands) -> list[float] | None:
+    """Row boundaries taken from the table's own rules, or None if it has none.
+
+    Only used when the rules account for the entries exactly - one ruled band
+    holding each group of figures, and no group split between two. Anything
+    less and the rules are telling a different story from the figures, and the
+    figures are the ones that are definitely there.
+    """
+    rules = grid.y_rules
+    if len(rules) < 3:
+        return None
+
+    centers = [_band_center(band) for band in bands]
+    holding = [
+        (rules[i], rules[i + 1])
+        for i in range(len(rules) - 1)
+        if any(rules[i] <= center < rules[i + 1] for center in centers)
+    ]
+    if len(holding) != len(bands):
+        return None
+
+    return [top for top, _ in holding] + [holding[-1][1]]
+
+
+def _anchor_edges(grid: Grid, bands) -> list[float]:
+    """Row boundaries halfway between one group of figures and the next."""
+    centers = [_band_center(band) for band in bands]
+    spacing = (
+        (centers[-1] - centers[0]) / (len(centers) - 1) if len(centers) > 1 else None
+    )
+    edges = [centers[0] - (spacing / 2 if spacing else (centers[0] - grid.top))]
+    edges += [(centers[i] + centers[i + 1]) / 2 for i in range(len(centers) - 1)]
+    edges.append(grid.bottom)
+    return edges
+
+
+def _band_center(band) -> float:
+    return sum((box.bbox[1] + box.bbox[3]) / 2 for box in band) / len(band)
 
 
 def _is_anchor(box, grid: Grid, form: FormLayout) -> bool:
@@ -329,53 +365,50 @@ def _cells(boxes, grid: Grid, form: FormLayout) -> dict[str, str]:
     return cells, corrected
 
 
-#: Vertical tolerance for telling one line of a wrapped cell from the next.
-_CELL_LINE_TOLERANCE = 1.0
-
-#: Two fragments on one line closer than this share of their height are one
-#: word. Thai is written without spaces and a PDF breaks its text wherever it
-#: likes, so "ม.ค.68" arrives as five fragments whose boxes touch or overlap,
-#: while "20 มค 68" leaves a small but real gap at each space. The threshold
-#: sits between the two, which is tight: a space the file did not record - and
-#: these files drop the one in "ต้นตาล คล่องแคล่ว", whose boxes overlap - cannot
-#: be recovered here at all.
+#: Two fragments closer than this share of their height are one word. Thai is
+#: written without spaces and a PDF breaks its text wherever it likes, so
+#: "ม.ค.68" arrives as five fragments whose boxes touch or overlap, while
+#: "20 มค 68" leaves a small but real gap at each space. The threshold sits
+#: between the two, which is tight: a space the file did not record - and these
+#: files drop the one in "ต้นตาล คล่องแคล่ว", whose boxes overlap - cannot be
+#: recovered here at all.
 _WORD_GAP = 0.06
 
 
 def _join(items) -> str:
     """Put a cell's fragments back together as they were set on the page.
 
-    Two things have to be got right, and getting either wrong makes the cell
-    unparseable:
+    *Order* comes from ``TextLine.order``, which the source set: the file's own
+    sequence for a searchable PDF, the geometric one for a recognised page.
 
-    *Order.* A cell wraps - "Methylphenidate HCl tablets 10 mg" over two lines -
-    and its fragments have to be read line by line. Sorting them all by x alone
-    interleaves the lines into "tablets Methylphenidate HCl 10 mg".
+    Position must not be used for it. The coordinates of a fragment can be
+    wrong where its text is right, and on these files they are: the glyphs of
+    "ด.ญ." come back at *descending* y, above their own line, so ordering by
+    position reads "ด.ญ.พิมพ์ เก่งการดี" as "พิมพ์.เก่งการดี ญด." - every name
+    and half the dates on the page scrambled, while the file had them in the
+    right order all along.
 
-    *Spacing.* Joining every fragment with a space turns "3 ม.ค.68" into
-    "3 ม . ค .68" and "ด.ญ.พิมพ์" into "ด . ญ . พิมพ์"; joining with nothing
-    runs separate words together. The gap between two fragments says which was
-    meant, and the gap is in the boxes.
+    *Spacing* is the one thing position still decides, and there are two ways a
+    break shows: a gap along the line, or a step down to the next one when the
+    cell wraps. Joining every fragment with a space turns "ม.ค.68" into
+    "ม . ค .68"; joining with nothing runs "Lorazepam" and "1 mg" together.
+
+    Stepping *down* is what marks a wrap - deliberately not any vertical move at
+    all. The glyphs of "ด.ญ." climb the page as they are read, and treating that
+    as a wrap puts a space inside the prefix.
     """
-    # A generous tolerance: everything here is inside one cell, so the only
-    # thing to separate is a genuine wrap, and the lines of a wrap are a whole
-    # row-height apart. The default would split "ม" from "." on a page that
-    # still carries a fraction of a degree of tilt.
-    lines = cluster_by_y(items, _CELL_LINE_TOLERANCE)
-    if not lines:
+    if not items:
         return ""
-    heights = sorted(box.bbox[3] - box.bbox[1] for box in items)
+    ordered = sorted(items, key=lambda box: box.order)
+    heights = sorted(box.bbox[3] - box.bbox[1] for box in ordered)
     limit = (heights[len(heights) // 2] or 1.0) * _WORD_GAP
 
-    out: list[str] = []
-    for line in lines:
-        if out:
-            out.append(" ")  # a wrap is a word break
-        out.append(line[0].text)
-        for previous, box in zip(line, line[1:]):
-            gap = box.bbox[0] - previous.bbox[2]
-            out.append("" if gap <= limit else " ")
-            out.append(box.text)
+    out = [ordered[0].text]
+    for previous, box in zip(ordered, ordered[1:]):
+        along = box.bbox[0] - previous.bbox[2]
+        wrapped = box.bbox[1] >= previous.bbox[3]
+        out.append(" " if along > limit or wrapped else "")
+        out.append(box.text)
     return "".join(out)
 
 
@@ -394,13 +427,16 @@ def _build_row(
     it produced anchors because it carries a closing balance, and it is not an
     entry. What must *not* be rejected is an entry the recogniser read badly.
 
-    So the test is on the ledger arithmetic, not on the identifying text. An
-    entry carries at least two figures across ยอดยกมา / รับ / จ่าย / คงเหลือ,
-    because each line restates the previous balance and then changes it. The
-    total line carries one, the closing balance, with dashes beside it. Judging
-    instead by whether the date or the drug name could be read threw away every
-    entry whose date was mangled and whose name wrapped out of its band - five
-    of the eleven rows on page 1 of the sample, each with its quantities intact.
+    A band is an entry when it carries any one of three things: something in
+    the date column, a drug name, or at least two of the four figures.
+
+    Each covers a case the others miss. The figures alone keep an entry whose
+    date was mangled and whose name wrapped out of its band - five of the eleven
+    rows on page 1 of ``SM_OCR.PDF``. The date column alone keeps a line whose
+    dates span a period, "3-31 ม.ค. 68", which is not a date, and whose name
+    belongs to the entry above: it has one figure and would otherwise be thrown
+    away. The total line has none of the three - no date, no name, one closing
+    figure with dashes beside it - which is what makes it the total line.
     """
     raw_date = cells.get(form_layout.DATE, "")
     # The ประเภท ๒ forms write the month in Thai; the handwritten ones write it
@@ -415,7 +451,10 @@ def _build_row(
         for role in form_layout.NUMERIC_ROLES
         if any(char.isdigit() for char in cells.get(role, ""))
     )
-    if entry_date is None and not has_name and figures < _MIN_FIGURES:
+    # A date column with digits in it, whether or not they parsed: a date is
+    # written with digits, and the total line leaves the column empty.
+    dated = any(char.isdigit() for char in raw_date)
+    if not dated and not has_name and figures < _MIN_FIGURES:
         return None
 
     row = LedgerRow(
