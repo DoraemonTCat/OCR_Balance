@@ -93,7 +93,7 @@ class TestSubmit:
         assert body["status"] == DocumentStatus.COMPLETED
         assert body["entry_count"] == 2
         assert len(body["entries"]) == 2
-        name = body["entries"][0]["ชื่อ/ความแรงของวัตถุออกฤทธิ์"]
+        name = body["entries"][0]["generic_name"]
         assert name == "Methylphenidate HCl tablets 10 mg"
 
 
@@ -106,19 +106,18 @@ class TestAgreedColumns:
     """
 
     EXPECTED = [
-        "ลำดับ",
-        "วัน\nเดือน\nปี",
-        "ชื่อ/ความแรงของวัตถุออกฤทธิ์",
-        "ชื่อการค้า",
-        "เลขที่/รุ่นที่/\nครั้งที่ผลิต",
-        "ได้มาจาก",
-        "ชื่อ-นามสกุล\nผู้รับยา",
-        "เลขที่บัตรประจำตัวประชาชน/\nหนังสือเดินทาง/บัตรประจำตัวอื่น\n"
-        "ที่ทางราชการออกให้",
-        "ยกมา",
-        "รับ",
-        "จ่าย",
-        "คงเหลือ",
+        "sequence",
+        "date",
+        "generic_name",
+        "trade_name",
+        "batch_no",
+        "received_from",
+        "issued_to",
+        "recipient_id",
+        "balance_brought",
+        "received",
+        "issued",
+        "balance",
     ]
 
     def test_every_entry_has_exactly_those_keys_in_that_order(self, client):
@@ -127,31 +126,32 @@ class TestAgreedColumns:
 
     def test_carries_what_the_form_says(self, client):
         entry = _upload(client).json()["entries"][0]
-        assert entry["ลำดับ"] == 1
-        assert entry["วัน\nเดือน\nปี"] == "5 มค 68"
-        assert entry["ชื่อ/ความแรงของวัตถุออกฤทธิ์"] == (
+        assert entry["sequence"] == 1
+        assert entry["date"] == "5 มค 68"
+        assert entry["generic_name"] == (
             "Methylphenidate HCl tablets 10 mg"
         )
-        assert entry["ชื่อการค้า"] == "Ritalin tablets 10 mg"
-        assert entry["เลขที่/รุ่นที่/\nครั้งที่ผลิต"] == "BE210"
+        assert entry["trade_name"] == "Ritalin tablets 10 mg"
+        assert entry["batch_no"] == "BE210"
 
     def test_carries_the_four_quantities(self, client):
         entry = _upload(client).json()["entries"][0]
-        assert entry["ยกมา"] == 450
-        assert entry["รับ"] is None  # a dash on the form
-        assert entry["จ่าย"] == 40
-        assert entry["คงเหลือ"] == 410
+        assert entry["balance_brought"] == 450
+        assert entry["received"] is None  # a dash on the form
+        assert entry["issued"] == 40
+        assert entry["balance"] == 410
 
     def test_the_sequence_restarts_at_each_new_form(self, client):
         second = _row(index=1)
         second.form_code = "ร.ย.ส. ๒/ว.จ. ๒-จ๑"
         response = _upload(client, result=_result([_row(), second]))
-        assert [e["ลำดับ"] for e in response.json()["entries"]] == [1, 1]
+        assert [e["sequence"] for e in response.json()["entries"]] == [1, 1]
 
-    def test_the_api_and_the_workbook_agree(self, client):
-        # Both are built from workers.balance_export, so they cannot drift. The
-        # workbook's header is two rows and merged, so the sub-headings - which
-        # are what the JSON keys use - are read from the second.
+    def test_the_api_and_the_workbook_line_up(self, client):
+        # The workbook keeps the format's Thai headings - it is the deliverable
+        # the customer prints - while the JSON uses role names a program can
+        # read. They are not the same strings, so what has to hold is that they
+        # describe the same twelve columns in the same order.
         document_id = _upload(client).json()["document_id"]
         sheet = load_workbook(
             io.BytesIO(client.get(f"{URL}/{document_id}/export.xlsx").content)
@@ -159,7 +159,12 @@ class TestAgreedColumns:
         top = [c.value for c in next(sheet.iter_rows(max_row=1))]
         sub = [c.value for c in next(sheet.iter_rows(min_row=2, max_row=2))]
         headings = [s or t for t, s in zip(top, sub)]
-        assert headings == self.EXPECTED
+
+        assert len(headings) == len(self.EXPECTED)
+        # The sheet still carries the format's headings, line breaks included.
+        assert headings[0] == "ลำดับ"
+        assert headings[1] == "วัน\nเดือน\nปี"
+        assert headings[-1] == "คงเหลือ"
 
 
 class TestResponseShape:

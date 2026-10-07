@@ -52,11 +52,32 @@ OUTPUT_COLUMNS: Sequence[tuple[str, "str | None", int]] = (
     ("จำนวน", "คงเหลือ", 10),
 )
 
-#: The key each column is given in the API's JSON: the sub-heading where there
-#: is one, the heading otherwise, so every key is distinct.
-OUTPUT_KEYS: Sequence[str] = tuple(
-    sub if sub else top for top, sub, _ in OUTPUT_COLUMNS
+#: The key each column is given in the API's JSON.
+#:
+#: Deliberately *not* the Thai headings above. Those belong to the Excel sheet,
+#: which has to match ``ฟอแมทตาราง OCR.xlsx`` character for character, line
+#: breaks included - a heading is a label on a printed page. A JSON key is an
+#: identifier a program reads, and a key carrying a newline and a slash is one
+#: every caller has to quote and none can autocomplete.
+#:
+#: The names are the column roles from ``form_layout``, so ``entries`` and
+#: ``ledger`` call the same column by the same name. ``sequence`` is the one
+#: addition: the forms do not number their lines, so this service counts them.
+OUTPUT_KEYS: Sequence[str] = (
+    "sequence",
+    "date",
+    form_layout.GENERIC_NAME,
+    form_layout.TRADE_NAME,
+    form_layout.BATCH_NO,
+    form_layout.RECEIVED_FROM,
+    form_layout.ISSUED_TO,
+    form_layout.RECIPIENT_ID,
+    form_layout.BALANCE_BROUGHT,
+    form_layout.RECEIVED,
+    form_layout.ISSUED,
+    form_layout.BALANCE,
 )
+assert len(OUTPUT_KEYS) == len(OUTPUT_COLUMNS), "one key per column"
 
 PAGE_COLUMNS: Sequence[tuple[str, int]] = (
     ("หน้า", 8),
