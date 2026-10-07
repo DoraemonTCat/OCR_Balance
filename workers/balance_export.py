@@ -10,9 +10,11 @@ ledger says - these columns *are* the ledger, so eleven of the twelve come
 straight off the form. Only ``ลำดับ`` is this service's own: the forms do not
 number their lines, so it is counted here, restarting at each new form.
 
-Sheet 2 carries the rest of what a form says and the review verdict - the unit,
-the remark, which page a line came from, and why a value is not to be trusted.
-Sheet 3 is the per-page outcome, where a page that could not be read is visible.
+Sheet 2 is the per-page outcome, where a page that could not be read is
+visible. There is no third sheet of raw detail any more: the agreed twelve
+columns are the deliverable, and a row the extraction is unsure of is shaded
+rather than explained. The unit, the remark and the review notes are still read
+and still stored - ``apps/balance/models.py`` - they are simply not written out.
 """
 from __future__ import annotations
 
@@ -56,30 +58,6 @@ OUTPUT_KEYS: Sequence[str] = tuple(
     sub if sub else top for top, sub, _ in OUTPUT_COLUMNS
 )
 
-#: Sheet 2: the ledger line as the form sets it out.
-LEDGER_COLUMNS: Sequence[tuple[str, int]] = (
-    ("หน้า", 7),
-    ("แบบฟอร์ม", 14),
-    ("วัน เดือน ปี", 13),
-    ("ชื่อและความแรง", 30),
-    ("ชื่อการค้า", 16),
-    ("เลขที่/รุ่นที่ผลิต", 16),
-    ("ชื่อผู้ผลิต", 18),
-    ("ได้มาจาก", 18),
-    ("จ่ายไปให้ / ผู้รับยา", 24),
-    ("เลขบัตรประชาชน", 20),
-    ("เลขที่ใบสั่งยา", 14),
-    ("ยอดยกมา", 11),
-    ("รับ", 9),
-    ("จ่าย", 9),
-    ("คงเหลือ", 11),
-    ("หน่วย", 9),
-    ("หมายเหตุ", 18),
-    ("Confidence", 12),
-    ("ต้องตรวจทาน", 13),
-    ("เหตุผล", 56),
-)
-
 PAGE_COLUMNS: Sequence[tuple[str, int]] = (
     ("หน้า", 8),
     ("แบบฟอร์ม", 16),
@@ -92,7 +70,6 @@ PAGE_COLUMNS: Sequence[tuple[str, int]] = (
 _HEADER_FILL = PatternFill("solid", fgColor="1F3864")
 _HEADER_FONT = Font(color="FFFFFF", bold=True)
 _REVIEW_FILL = PatternFill("solid", fgColor="FFF2CC")
-_DATE_FORMAT = "yyyy-mm-dd"
 
 
 def build(rows, pages) -> bytes:
@@ -108,7 +85,6 @@ def build(rows, pages) -> bytes:
     output.title = "Output"
     _write_output(output, rows)
 
-    _write_ledger(workbook.create_sheet("ข้อมูลจากตาราง"), rows)
     _write_pages(workbook.create_sheet("สรุปรายหน้า"), pages)
 
     buffer = io.BytesIO()
@@ -182,43 +158,6 @@ def _write_output(sheet: Worksheet, rows) -> None:
     _finish(sheet, OUTPUT_COLUMNS, header_rows=2)
 
 
-def _write_ledger(sheet: Worksheet, rows) -> None:
-    _header(sheet, LEDGER_COLUMNS)
-    for row in rows:
-        notes = _value(row, "review_notes") or []
-        sheet.append(
-            [
-                _value(row, "page_number"),
-                _value(row, "form_code"),
-                _date(row),
-                _value(row, "generic_name"),
-                _value(row, "trade_name"),
-                _value(row, "batch_no"),
-                _value(row, "manufacturer"),
-                _value(row, "received_from"),
-                _value(row, "issued_to"),
-                _value(row, "recipient_id"),
-                _value(row, "prescription_no"),
-                _quantity(row, form_layout.BALANCE_BROUGHT),
-                _quantity(row, form_layout.RECEIVED),
-                _quantity(row, form_layout.ISSUED),
-                _quantity(row, form_layout.BALANCE),
-                _value(row, "unit"),
-                _value(row, "remark"),
-                _confidence(row),
-                "ใช่" if _value(row, "needs_review") else "",
-                "; ".join(notes),
-            ]
-        )
-        written = sheet[sheet.max_row]
-        written[2].number_format = _DATE_FORMAT
-        if _value(row, "needs_review"):
-            for cell in written:
-                cell.fill = _REVIEW_FILL
-
-    _finish(sheet, LEDGER_COLUMNS)
-
-
 def _write_pages(sheet: Worksheet, pages) -> None:
     _header(sheet, PAGE_COLUMNS)
     for page in pages:
@@ -270,13 +209,6 @@ def _quantity(row, role: str):
     return getattr(row, role, None)
 
 
-def _date(row):
-    return getattr(row, "entry_date", None)
-
-
-def _confidence(row):
-    value = getattr(row, "confidence", None)
-    return float(value) if value is not None else None
 
 
 # --- sheet furniture -------------------------------------------------------

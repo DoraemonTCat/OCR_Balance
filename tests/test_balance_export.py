@@ -147,21 +147,25 @@ class OutputSheetTests(SimpleTestCase):
         self.assertEqual([_values(sheet, r)[0] for r in (3, 4, 5)], [1, 1, 2])
 
 
-class LedgerSheetTests(SimpleTestCase):
-    def test_carries_the_quantities_the_output_sheet_has_no_room_for(self):
-        sheet = _workbook()["ข้อมูลจากตาราง"]
-        values = list(next(sheet.iter_rows(min_row=2, values_only=True)))
-        self.assertEqual(values[0], 4)             # page
-        self.assertEqual(values[11], 450)          # ยอดยกมา
-        self.assertIsNone(values[12])              # รับ, a dash on the form
-        self.assertEqual(values[13], 40)           # จ่าย
-        self.assertEqual(values[14], 410)          # คงเหลือ
+class WorkbookShapeTests(SimpleTestCase):
+    """Two sheets: the agreed columns, and how each page went."""
 
-    def test_records_why_a_row_needs_review(self):
-        sheet = _workbook()["ข้อมูลจากตาราง"]
-        values = list(next(sheet.iter_rows(min_row=2, values_only=True)))
-        self.assertEqual(values[18], "ใช่")
-        self.assertIn("written in Thai", values[19])
+    def test_there_is_no_sheet_of_raw_detail(self):
+        self.assertEqual(_workbook().sheetnames, ["Output", "สรุปรายหน้า"])
+
+    def test_a_row_needing_review_is_shaded_rather_than_explained(self):
+        # With the detail sheet gone this is all that is left of the verdict in
+        # the workbook, and it is enough to send a reader to the right line.
+        sheet = _workbook()["Output"]
+        filled = {cell.fill.fgColor.rgb for cell in sheet[3]}
+        self.assertEqual(len(filled), 1)
+        plain = _row()
+        plain.needs_review = False
+        plain.review_notes = []
+        unshaded = _workbook(rows=[plain])["Output"]
+        self.assertNotEqual(
+            next(iter(filled)), unshaded[3][0].fill.fgColor.rgb
+        )
 
 
 class PageSheetTests(SimpleTestCase):

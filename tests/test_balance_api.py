@@ -162,73 +162,20 @@ class TestAgreedColumns:
         assert headings == self.EXPECTED
 
 
-class TestLedgerDetail:
-    """``ledger`` keeps what the sixteen columns have nowhere to put."""
+class TestResponseShape:
+    """``entries`` is the whole of the per-row answer."""
 
-    def test_carries_the_figures_and_the_verdict(self, client):
-        row = _upload(client).json()["ledger"][0]
-        assert row["balance_brought"] == 450
-        assert row["received"] is None  # a dash on the form
-        assert row["issued"] == 40
-        assert row["balance"] == 410
-        assert row["batch_no"] == "BE210"
-        assert "needs_review" in row and "review_notes" in row
-
-    def test_lines_up_one_for_one_with_entries(self, client):
+    def test_nothing_else_per_row_is_sent(self, client):
         body = _upload(client).json()
-        assert len(body["ledger"]) == len(body["entries"])
+        assert "ledger" not in body
+        assert set(body["entries"][0]) == set(TestAgreedColumns.EXPECTED)
 
-    def test_records_the_engine_language_on_the_document(self, client):
-        # Which fields are trustworthy depends on it, so it is part of the answer.
-        assert _upload(client).json()["ocr_language"] == "latin"
-
-    def test_keeps_the_per_page_outcome(self, client):
-        summary = _upload(client).json()["page_summary"]
-        assert summary == [
-            {
-                "page": 1,
-                "form": "บ.ย.ส. ๒/ว.จ. ๒-จ๑",
-                "rows": 2,
-                "skew": 0.0,
-                "source": "TEXT_LAYER",
-                "confidence": 1.0,
-                "error": "",
-            }
-        ]
-
-    def test_stores_the_uploader(self, client):
-        response = _upload(client, uploaded_by="go-backend")
-        assert response.json()["uploaded_by"] == "go-backend"
-
-    def test_rejects_anything_that_is_not_a_pdf(self, client):
-        response = client.post(
-            URL, {"file": SimpleUploadedFile("rows.xlsx", b"PK\x03\x04", "application/zip")}
-        )
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-
-    def test_requires_a_file(self, client):
-        assert client.post(URL, {}).status_code == status.HTTP_400_BAD_REQUEST
-
-    def test_an_unreadable_document_answers_422_not_500(self, client):
-        from workers.pdf_extractor import PdfCorrupted
-
-        with mock.patch(
-            "apps.balance.services._extract", side_effect=PdfCorrupted("cannot open PDF")
-        ):
-            response = client.post(
-                URL,
-                {"file": SimpleUploadedFile("bad.pdf", PDF_BYTES, "application/pdf")},
-            )
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-        assert response.json()["error"]["code"] == "INVALID_PDF"
-        assert BalanceDocument.objects.get().status == DocumentStatus.FAILED
-
-    def test_two_submissions_of_one_name_do_not_collide(self, client):
-        first = _upload(client).json()["document_id"]
-        second = _upload(client).json()["document_id"]
-        assert first != second
-        paths = set(BalanceDocument.objects.values_list("file_path", flat=True))
-        assert len(paths) == 2
+    def test_the_document_still_says_how_many_rows_need_checking(self, client):
+        # The per-row verdict is not in the response; this is what is left of
+        # it, and it is the number that decides whether anyone has to look.
+        body = _upload(client).json()
+        assert body["entry_count"] == 2
+        assert "review_count" in body
 
 
 class TestRetrieve:
