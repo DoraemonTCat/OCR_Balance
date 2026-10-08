@@ -1,0 +1,39 @@
+{
+  "_about": "คำสำคัญจากไฟล์ keyword.docx — ชุดนี้เป็นของฝั่งพี่ (งานแมพ) เก็บไว้ที่นี่เพื่อใช้ทดสอบว่า JSON ที่เราส่งออกไปแมพได้จริง",
+  "_note_phrase_abbr": "รูปแบบ 'วลี (ตัวย่อ)' ตามคู่มือหน้า 3 ให้นับทั้งวลีเต็มและตัวย่อ เช่น Nitrosamines กับ NDMA",
+  "_contacts": {
+    "websites": ["https://hpvcthai.fda.moph.go.th/home", "https://narcotic.fda.moph.go.th/"],
+    "email": "narcotic@fda.moph.go.th"
+  },
+
+  "keywords": [
+    { "keyword": "เรียกคืนยา สารก่อมะเร็ง", "lang": "th" },
+    { "keyword": "อย. เรียกเก็บคืนยา", "lang": "th" },
+    { "keyword": "กองควบคุมวัตถุเสพติด เรียกเก็บคืนยา", "lang": "th" },
+    { "keyword": "สารปนเปื้อนในยา", "lang": "th" },
+
+    { "keyword": "NDMA", "lang": "en", "full_form": "N-Nitrosodimethylamine" },
+    { "keyword": "AZBT", "lang": "en", "full_form": "Azido-Methyl Biphenyl Tetrazole" },
+    { "keyword": "Nitrosamines", "lang": "en", "th": "กลุ่มสารไนโตรซามีน" },
+    { "keyword": "Drug Recall Carcinogen", "lang": "en", "th": "การเรียกคืนยาเนื่องจากสารก่อมะเร็ง" },
+    { "keyword": "Impurity in medications", "lang": "en", "th": "สารปนเปื้อนในยา" },
+    { "keyword": "Nitrosamine impurities in drug products", "lang": "en" },
+
+    { "keyword": "Drug Recall", "lang": "en", "th": "การเรียกเก็บยาคืน" },
+    { "keyword": "Medication Recall", "lang": "en", "th": "การเรียกเก็บยาคืน" },
+    { "keyword": "Recall of medicinal products", "lang": "en", "th": "การเรียกคืนผลิตภัณฑ์ยา" },
+    { "keyword": "Voluntary Recall", "lang": "en", "th": "การเรียกคืนโดยสมัครใจ (จากผู้ผลิต)" },
+    { "keyword": "Mandatory Recall", "lang": "en", "th": "การเรียกคืนตามคำสั่ง (จาก อย.)" },
+    { "keyword": "Ordered Recall", "lang": "en", "th": "การเรียกคืนตามคำสั่ง (จาก อย.)" },
+    { "keyword": "Rapid Alert Notification", "lang": "en", "th": "การแจ้งเตือนภัยเร่งด่วนเรื่องคุณภาพยา" },
+    { "keyword": "Safety Alert", "lang": "en" },
+    { "keyword": "Batch Recall", "lang": "en" },
+    { "keyword": "Lot Recall", "lang": "en" },
+    { "keyword": "Drug warning", "lang": "en" },
+
+    { "keyword": "วัตถุที่ออกฤทธิ์ต่อจิตและประสาท", "lang": "th", "focus": true },
+    { "keyword": "วัตถุออกฤทธิ์", "lang": "th", "focus": true },
+    { "keyword": "ยาเสพติดให้โทษ", "lang": "th", "focus": true },
+    { "keyword": "วัตถุเสพติด", "lang": "th", "focus": true }
+  ]
+}

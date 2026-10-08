@@ -133,6 +133,13 @@ workers/
   balance_export.py      ไฟล์ Excel
   ocr_engine.py          PaddleOCR + preprocessing (ใช้เมื่อไม่มี text layer)
   pdf_extractor.py       ตรวจไฟล์ PDF + อ่าน text layer ที่ฝังมาในไฟล์
+  crawler/               ดึงข่าวเฝ้าระวังจากเว็บหน่วยงานกำกับดูแล
+    crawler.py           ดึงหน้าเว็บ แยก HTML/RSS และสกัดเนื้อหา
+    normalize.py         ปรับข้อความให้อยู่ในรูปมาตรฐานเดียว
+    net.py               ใบรับรอง HTTPS และค่าคงที่การเชื่อมต่อ
+    runner.py            ควบคุมการรันหนึ่งรอบ ดึงหลายแหล่งพร้อมกัน
+    cli.py               ส่วนติดต่อบรรทัดคำสั่ง
+    sources.json         นิยามแหล่งข่าว 31 รายการ
 config/settings/
   base.py                ค่ากลาง
   development.py         PostgreSQL ตาม .env
@@ -142,13 +149,36 @@ config/settings/
 scripts/
   setup.ps1 migrate.ps1 local-run.ps1 test.ps1
   setup_certs.py         แก้ปัญหา TLS ตอนโหลดโมเดล
+  survey.py              ตรวจความพร้อมของแหล่งข่าว
+  probe_feeds.py probe2.py probe_links.py
+                         ค้น RSS feed และวิเคราะห์โครงสร้าง URL
+  make_sample.py demo_match.py
+                         สร้างผลลัพธ์ตัวอย่าง และสาธิตการจับคู่คำสำคัญ
 docs/
   BALANCE_API.md         สัญญา API
   OCR_THAI.md            ข้อจำกัดภาษาไทย
+  NEWS_CRAWLER.md        การใช้งานตัวดึงข่าว
+  NEWS_SOURCES.md        ผลสำรวจความพร้อมของแหล่งข่าว
+data/crawl/              ผลการดึงข่าวแต่ละรอบ (ไม่เข้า git)
 ```
 
 เส้นทางทั้งหมดที่เปิดให้เรียก: `/api/v1/balance/*`, `/health`, `/ready`
 ไม่มีอย่างอื่น
+
+## ตัวดึงข่าว
+
+นอกจากการอ่าน PDF โปรเจ็กต์นี้ยังมีส่วนดึงข่าวเฝ้าระวังจากเว็บหน่วยงานกำกับดูแล
+(US FDA, EMA, UK MHRA, Health Canada, HSA, PMDA และอื่น ๆ รวม 31 แหล่ง)
+คืนผลเป็น JSON ที่ล้างข้อความแล้ว พร้อมให้ชั้นบนนำไปจับคู่กับคำสำคัญ
+
+```powershell
+python -m workers.crawler.cli
+```
+
+ส่วนนี้เป็น Python ล้วน ไม่ `import django` และไม่แตะฐานข้อมูล
+การนับคำสำคัญ การบันทึกผล และการตั้งเวลาอยู่นอกขอบเขตของมัน
+
+รายละเอียดอยู่ใน [docs/NEWS_CRAWLER.md](docs/NEWS_CRAWLER.md)
 
 ## เทส
 

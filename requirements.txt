@@ -23,3 +23,11 @@ Pillow==11.0.0
 
 # Excel output
 openpyxl==3.1.5
+
+# News crawler (workers/crawler) — ดึงข่าวเฝ้าระวังจากเว็บหน่วยงานกำกับดูแล
+httpx==0.28.1
+beautifulsoup4==4.14.3
+lxml==6.1.2
+# เครื่องที่มีแอนตี้ไวรัสดักตรวจ HTTPS (เช่น Avast) จะสวมใบรับรองของตัวเองเข้ามา
+# ซึ่งไม่อยู่ใน certifi — truststore ทำให้ Python อ่าน certificate store ของระบบได้
+truststore==0.10.4

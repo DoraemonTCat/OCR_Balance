@@ -14,6 +14,10 @@ data/export/*
 !data/*/.gitkeep
 data/*.sqlite3
 
+# ผลการดึงข่าวแต่ละรอบ สร้างใหม่ได้เสมอ
+data/crawl/*
+!data/crawl/.gitkeep
+
 # Scratch output from trying the API by hand.
 /result.json
 /output.xlsx
