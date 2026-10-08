@@ -18,20 +18,28 @@
 สั่งรันจากบรรทัดคำสั่ง:
     python -m workers.crawler.cli
 """
-from .crawler import (BlockedError, Fetcher, crawl_source, extract_article,
-                      extract_links, extract_title, parse_feed)
+from .crawler import (BlockedError, Fetcher, crawl_source, date_from_url,
+                      extract_article,
+                      extract_links, extract_published_at, extract_title,
+                      parse_feed)
 from .normalize import normalize_text, normalize_thai
-from .runner import Canceller, load_sources, run
+from .runner import (OPTIONAL_FIELDS, REQUIRED_FIELDS, Canceller,
+                     load_sources, normalize_source, run)
 
 __all__ = [
     "BlockedError",
     "Canceller",
     "Fetcher",
     "crawl_source",
+    "date_from_url",
     "extract_article",
     "extract_links",
+    "extract_published_at",
     "extract_title",
+    "OPTIONAL_FIELDS",
+    "REQUIRED_FIELDS",
     "load_sources",
+    "normalize_source",
     "normalize_text",
     "normalize_thai",
     "parse_feed",

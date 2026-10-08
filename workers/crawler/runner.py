@@ -22,10 +22,48 @@ OUTPUT_DIR = PROJECT_ROOT / "data" / "crawl"       # ที่เก็บไฟ
 MAX_WORKERS = 6
 
 
-def load_sources(path=None, statuses=("ready",)):
-    """อ่าน sources.json
+#: ฟิลด์ที่ source หนึ่งรายการต้องมี
+REQUIRED_FIELDS = ("name", "url")
 
-    statuses: กรองตามสถานะจากผลสำรวจเฟส 0 — ค่าปริยายเอาเฉพาะ ready
+#: ฟิลด์ที่ใส่หรือไม่ใส่ก็ได้ พร้อมค่าที่ใช้เมื่อไม่ได้ส่งมา
+OPTIONAL_FIELDS = {
+    "kind": "html",              # "html" หรือ "rss"
+    "link_pattern": None,        # regex คัดลิงก์บทความ ใช้เฉพาะ kind=html
+    "max_articles": 30,
+    "extract_full_text": False,  # True = ตามเข้าไปดึงเนื้อข่าวเต็ม
+    "group": None,               # ป้ายกำกับ ไม่มีผลต่อการทำงาน
+}
+
+
+def normalize_source(source):
+    """ตรวจและเติมค่าปริยายให้ source หนึ่งรายการ
+
+    ใช้ตอนรับข้อมูลจากภายนอก เช่นแถวที่อ่านมาจากฐานข้อมูล
+    เพื่อให้ได้ข้อผิดพลาดที่อ่านรู้เรื่องตั้งแต่ก่อนเริ่มยิงเว็บ
+    แทนที่จะไปพังกลางทางด้วย KeyError
+    """
+    missing = [f for f in REQUIRED_FIELDS if not source.get(f)]
+    if missing:
+        raise ValueError(
+            f"source ขาดฟิลด์ที่จำเป็น: {', '.join(missing)} — ได้รับ {sorted(source)}")
+
+    kind = source.get("kind") or "html"
+    if kind not in ("html", "rss"):
+        raise ValueError(f"{source['name']}: kind ต้องเป็น 'html' หรือ 'rss' ไม่ใช่ {kind!r}")
+
+    merged = {**OPTIONAL_FIELDS, **{k: v for k, v in source.items() if v is not None}}
+    merged["kind"] = kind
+    return merged
+
+
+def load_sources(path=None, statuses=("ready",)):
+    """อ่านแหล่งข่าวจาก sources.json
+
+    ไฟล์นี้เป็น *ข้อมูลตั้งต้น* สำหรับทดลองรันและเทสต์เท่านั้น
+    เมื่อใช้งานจริง ผู้เรียกควรอ่านแหล่งข่าวจากฐานข้อมูลของตัวเอง
+    แล้วส่ง list เข้า run() โดยตรง ดู docs/NEWS_CRAWLER.md หัวข้อ "สัญญาข้อมูล"
+
+    statuses: กรองตามสถานะจากผลสำรวจ — ค่าปริยายเอาเฉพาะ ready
               ส่ง None เพื่อเอาทั้งหมด
     """
     path = pathlib.Path(path) if path else BASE / "sources.json"
@@ -60,6 +98,8 @@ def run(sources=None, *, max_articles=None, canceller=None, respect_robots=True)
     """
     if sources is None:
         _, sources = load_sources()
+    # ตรวจก่อนยิงเว็บ ผิดตรงไหนจะรู้ทันทีพร้อมชื่อแหล่งข่าว
+    sources = [normalize_source(s) for s in sources]
     stop = canceller.is_set if canceller else None
 
     with Fetcher(respect_robots=respect_robots) as fetcher:

@@ -12,11 +12,12 @@
     "host_delay_seconds": 1.0,
     "user_agent": "HerbRiskBot/1.0"
   },
-
   "sources": [
     {
       "name": "US FDA - Recalls & Alerts",
-      "group": "regulator", "status": "ready", "kind": "rss",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/recalls/rss.xml",
       "original_url": "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts",
       "extract_full_text": true,
@@ -24,7 +25,9 @@
     },
     {
       "name": "US FDA - MedWatch",
-      "group": "regulator", "status": "ready", "kind": "rss",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/medwatch/rss.xml",
       "original_url": "https://www.fda.gov/safety/medwatch-fda-safety-information-and-adverse-event-reporting-program",
       "extract_full_text": true,
@@ -32,7 +35,9 @@
     },
     {
       "name": "US FDA - Drug Safety",
-      "group": "regulator", "status": "ready", "kind": "rss",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/drugs/rss.xml",
       "original_url": "https://www.fda.gov/drugs/drug-safety-and-availability",
       "extract_full_text": true,
@@ -40,7 +45,9 @@
     },
     {
       "name": "US FDA - Biologics Recalls",
-      "group": "regulator", "status": "ready", "kind": "rss",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/biologics/rss.xml",
       "original_url": "https://www.fda.gov/vaccines-blood-biologics/safety-availability-biologics/recalls-biologics",
       "extract_full_text": true,
@@ -48,7 +55,9 @@
     },
     {
       "name": "US FDA - Press Releases",
-      "group": "regulator", "status": "ready", "kind": "rss",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml",
       "original_url": "https://www.fda.gov/",
       "extract_full_text": true,
@@ -56,7 +65,9 @@
     },
     {
       "name": "US FDA - Device Safety",
-      "group": "regulator", "status": "ready", "kind": "html",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "html",
       "url": "https://www.fda.gov/medical-devices/medical-device-safety",
       "link_pattern": "/medical-devices/medical-device-recalls-and-early-alerts/",
       "extract_full_text": true,
@@ -64,7 +75,9 @@
     },
     {
       "name": "US FDA - Letters to HCP",
-      "group": "regulator", "status": "ready", "kind": "html",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "html",
       "url": "https://www.fda.gov/medical-devices/medical-device-safety/letters-health-care-providers",
       "link_pattern": "/medical-devices/letters-health-care-providers/",
       "extract_full_text": true,
@@ -72,7 +85,9 @@
     },
     {
       "name": "UK MHRA - Drug Device Alerts",
-      "group": "regulator", "status": "ready", "kind": "rss",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://www.gov.uk/drug-device-alerts.atom",
       "original_url": "https://www.gov.uk/drug-device-alerts",
       "extract_full_text": true,
@@ -80,7 +95,9 @@
     },
     {
       "name": "PMDA Japan - All Updates",
-      "group": "regulator", "status": "ready", "kind": "rss",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://www.pmda.go.jp/rss_008.xml",
       "original_url": "https://www.pmda.go.jp/english/",
       "extract_full_text": true,
@@ -88,7 +105,9 @@
     },
     {
       "name": "Health Canada - Recalls",
-      "group": "regulator", "status": "ready", "kind": "html",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "html",
       "url": "https://recalls-rappels.canada.ca/en",
       "link_pattern": "/en/alert-recall/",
       "extract_full_text": true,
@@ -96,7 +115,9 @@
     },
     {
       "name": "HSA Singapore - Announcements",
-      "group": "regulator", "status": "ready", "kind": "html",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "html",
       "url": "https://www.hsa.gov.sg/announcements",
       "link_pattern": "/announcements/[^/]+/?$",
       "extract_full_text": true,
@@ -104,7 +125,9 @@
     },
     {
       "name": "EMA - News",
-      "group": "regulator", "status": "ready", "kind": "html",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "html",
       "url": "https://www.ema.europa.eu/en",
       "link_pattern": "/en/news/",
       "extract_full_text": true,
@@ -112,7 +135,9 @@
     },
     {
       "name": "NIDA - News Releases",
-      "group": "regulator", "status": "ready", "kind": "html",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "html",
       "url": "https://nida.nih.gov/news-events/news-releases",
       "original_url": "https://nida.nih.gov/",
       "link_pattern": "/news-events/news-releases/",
@@ -121,7 +146,9 @@
     },
     {
       "name": "BBC - Health",
-      "group": "news", "status": "ready", "kind": "rss",
+      "group": "news",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
       "original_url": "https://www.bbc.com/news/health",
       "extract_full_text": false,
@@ -129,7 +156,9 @@
     },
     {
       "name": "CNN - Health",
-      "group": "news", "status": "ready", "kind": "rss",
+      "group": "news",
+      "status": "ready",
+      "kind": "rss",
       "url": "http://rss.cnn.com/rss/cnn_health.rss",
       "original_url": "https://edition.cnn.com/health",
       "extract_full_text": false,
@@ -137,7 +166,9 @@
     },
     {
       "name": "ABC News - Health",
-      "group": "news", "status": "ready", "kind": "rss",
+      "group": "news",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://feeds.abcnews.com/abcnews/healthheadlines",
       "original_url": "https://abcnews.go.com/Health/",
       "extract_full_text": false,
@@ -145,7 +176,9 @@
     },
     {
       "name": "NY Times - Health",
-      "group": "news", "status": "ready", "kind": "rss",
+      "group": "news",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://rss.nytimes.com/services/xml/rss/nyt/Health.xml",
       "original_url": "https://www.nytimes.com/section/health",
       "extract_full_text": false,
@@ -153,7 +186,9 @@
     },
     {
       "name": "InfoQuest",
-      "group": "news", "status": "ready", "kind": "rss",
+      "group": "news",
+      "status": "ready",
+      "kind": "rss",
       "url": "https://www.infoquest.co.th/feed",
       "original_url": "https://www.infoquest.co.th/world",
       "extract_full_text": false,
@@ -161,92 +196,118 @@
     },
     {
       "name": "Partnership to End Addiction",
-      "group": "news", "status": "ready", "kind": "html",
+      "group": "news",
+      "status": "ready",
+      "kind": "html",
       "url": "https://drugfree.org/",
-      "link_pattern": "/article/",
+      "link_pattern": "/article/(?!privacy-policy|terms-of-use|fcoi|work-at-the-partnership|fundraise-on-our-behalf|endurance|get-one-on-one-help|self-care)[a-z0-9-]{4,}",
       "extract_full_text": false,
-      "note": "/feed/ คืนหน้าแรกแทน feed จริง → ใช้ HTML ลิงก์บทความอยู่ใต้ /article/"
+      "note": "/article/ เพียว ๆ หลวมเกินไป ดึงหน้านโยบายและหน้าแนะนำองค์กรติดมาด้วย 7 จาก 17 จึงใส่รายการยกเว้นไว้ | เว็บนี้เป็นคู่มือสำหรับผู้ปกครอง ไม่ใช่ข่าวเรียกคืนยา ควรทบทวนว่าจำเป็นต้องเฝ้าระวังหรือไม่"
     },
-
     {
       "name": "สบส. (HSS MOPH)",
-      "group": "regulator", "status": "needs_fix", "kind": "html",
-      "url": "https://hss.moph.go.th/info_act/",
-      "link_pattern": "/info_act/page/",
-      "extract_full_text": true,
-      "note": "เข้าได้ปกติ แต่ลิงก์ทั้ง 15 เป็น page/*.php ซึ่งดูเหมือนหน้าเมนู ไม่ใช่ข่าวรายชิ้น ต้องหาหน้ารวมข่าวจริงก่อน | เว็บไทย ต้อง normalize"
+      "group": "regulator",
+      "status": "blocked",
+      "kind": "html",
+      "url": "https://hss.moph.go.th/info_act/page/s_showtopic1.php",
+      "note": "หน้ารายการข่าวตอบ HTTP 200 แต่ HTML ไม่มีแท็ก <a> เลย (5 KB) = โหลดด้วย JavaScript เหมือน Hong Kong MDD",
+      "original_url": "https://hss.moph.go.th/info_act/"
     },
     {
       "name": "UNODC",
-      "group": "regulator", "status": "needs_fix", "kind": "html",
-      "url": "https://www.unodc.org/",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "html",
+      "url": "https://www.unodc.org/unodc/en/press/index.html",
       "extract_full_text": true,
-      "note": "หน้าแรกมีลิงก์เข้าเกณฑ์ 263 รายการ กระจายทุกภูมิภาคและหลายภาษา กว้างเกินไป ต้องหาหน้า press release ที่เจาะจง"
+      "note": "เปลี่ยนจากหน้าแรกมาหน้า press release เจอข่าว 24 รายการ แยกตามปี/เดือน",
+      "original_url": "https://www.unodc.org/",
+      "link_pattern": "/unodc/en/press/releases/"
     },
     {
       "name": "INCB",
-      "group": "regulator", "status": "needs_fix", "kind": "html",
-      "url": "https://www.incb.org/incb/index.html",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "html",
+      "url": "https://www.incb.org/incb/en/news/press-releases/press-release.html",
       "extract_full_text": true,
-      "note": "ลิงก์เข้าเกณฑ์ 178 รายการ ส่วนใหญ่เป็นหน้าสถาบัน ไม่ใช่ข่าว ต้องหาหน้า news/press"
+      "note": "เปลี่ยนมาหน้า press release โดยตรง regex บังคับให้มีเลขปีคั่น เพื่อไม่ให้ไปโดนหน้า press-release-2024.html ที่เป็นสารบัญรายปี",
+      "original_url": "https://www.incb.org/incb/index.html",
+      "link_pattern": "/incb/en/news/press-releases/\\d{4}/"
     },
     {
       "name": "ONDCP (White House)",
-      "group": "regulator", "status": "needs_fix", "kind": "html",
+      "group": "regulator",
+      "status": "needs_fix",
+      "kind": "html",
       "url": "https://www.whitehouse.gov/ondcp/",
       "extract_full_text": true,
-      "note": "หน้า ondcp แทบไม่มีข่าว ลิงก์ข่าวจริงอยู่ใต้ /releases/<ปี>/ ซึ่งเป็นข่าวทำเนียบรวม ไม่ได้แยกเฉพาะยาเสพติด"
+      "note": "หน้า ondcp แทบไม่มีข่าว ส่วน /briefing-room/ ที่ลองแทนให้ข่าวทำเนียบรวม ทุกเรื่อง ไม่ได้แยกเฉพาะยาเสพติด ต้องให้ผู้ดูแลตัดสินว่าจะรับข่าวปนหรือตัดทิ้ง",
+      "link_pattern": "/releases/"
     },
     {
       "name": "Hong Kong MDD",
-      "group": "regulator", "status": "needs_fix", "kind": "html",
-      "url": "https://www.mdd.gov.hk/en/home/index.html",
-      "suggested_url": "https://www.mdd.gov.hk/en/whats-new/index.html",
-      "extract_full_text": true,
-      "note": "หน้าแรกมีลิงก์แค่ 4 รายการ (เป็นเมนู) เห็นลิงก์ /en/whats-new/ ซึ่งน่าจะเป็นหน้าข่าวจริง ต้องเข้าไปยืนยัน"
+      "group": "regulator",
+      "status": "blocked",
+      "kind": "html",
+      "url": "https://www.mdd.gov.hk/en/whats-new/index.html",
+      "note": "หน้า whats-new ตอบ HTTP 200 แต่ HTML ที่ได้ไม่มีแท็ก <a> เลยสักตัว (45 KB) = โหลดรายการข่าวด้วย JavaScript ทั้งหมด BeautifulSoup อ่านไม่เห็น ต้องใช้ headless browser ซึ่งอยู่นอกขอบเขตของโมดูลนี้",
+      "original_url": "https://www.mdd.gov.hk/en/home/index.html"
     },
     {
       "name": "Erowid",
-      "group": "news", "status": "needs_fix", "kind": "html",
+      "group": "news",
+      "status": "blocked",
+      "kind": "html",
       "url": "https://www.erowid.org/",
-      "extract_full_text": false,
-      "note": "หน้าแรกมีแต่ลิงก์บริจาคและเมนู ไม่ใช่หน้าข่าว และเว็บนี้เป็นคลังข้อมูลไม่ใช่สำนักข่าว ควรถามพี่ว่าต้องการส่วนไหน"
+      "note": "ตอบ HTTP 403 ทุก User-Agent ในการสำรวจรอบล่าสุด และเว็บนี้เป็นคลังข้อมูล ไม่ใช่สำนักข่าว ไม่มีหน้ารวมข่าวให้ดึง"
     },
-
     {
       "name": "EMA - News Search",
-      "group": "regulator", "status": "blocked", "kind": "html",
+      "group": "regulator",
+      "status": "blocked",
+      "kind": "html",
       "url": "https://www.ema.europa.eu/en/search?f%5B0%5D=ema_search_custom_entity_bundle%3Aema_news",
       "note": "HTTP 403 ด้วย UA เรา และ 401 ด้วย browser UA = บล็อกทุก UA | ใช้ EMA - News แทนได้"
     },
     {
       "name": "Reuters - Healthcare",
-      "group": "news", "status": "blocked", "kind": "html",
+      "group": "news",
+      "status": "blocked",
+      "kind": "html",
       "url": "https://www.reuters.com/business/healthcare-pharmaceuticals/?type=healthNews",
       "robots_disallow": true,
       "note": "สำคัญที่สุด: robots.txt ของ Reuters ห้ามดึง URL นี้ + ตอบ 401 ทุก UA + RSS 404 → ต้องไม่ดึง ห้ามพยายามข้าม"
     },
     {
       "name": "US DEA",
-      "group": "regulator", "status": "blocked", "kind": "html",
+      "group": "regulator",
+      "status": "blocked",
+      "kind": "html",
       "url": "https://www.dea.gov/",
       "note": "HTTP 403 ทุก UA ทั้งหน้าเว็บและ RSS ที่ลอง 2 URL | เป็นเว็บรัฐ น่าจะติด CDN/WAF ลองขอ whitelist ได้"
     },
     {
       "name": "EIN News - Health",
-      "group": "news", "status": "blocked", "kind": "html",
+      "group": "news",
+      "status": "blocked",
+      "kind": "html",
       "url": "https://health.einnews.com/",
       "note": "HTTP 403 ทุก UA | เว็บนี้เป็นบริการแบบสมัครสมาชิก อาจต้องใช้ API ที่เสียเงิน"
     },
     {
       "name": "TGA - Alerts",
-      "group": "regulator", "status": "blocked", "kind": "html",
+      "group": "regulator",
+      "status": "blocked",
+      "kind": "html",
       "url": "https://www.tga.gov.au/resources/alert",
       "note": "ReadTimeout ด้วย UA เรา และ RemoteProtocolError ด้วย browser UA | RSS ที่ลอง 2 URL ก็ timeout — น่าจะบล็อกที่ระดับเครือข่าย ควรลองใหม่เวลาอื่นหรือจาก IP อื่น"
     },
     {
       "name": "TGA - DRAC",
-      "group": "regulator", "status": "blocked", "kind": "html",
+      "group": "regulator",
+      "status": "blocked",
+      "kind": "html",
       "url": "https://apps.tga.gov.au/PROD/DRAC/arn-entry.aspx",
       "note": "HTTP 200 แต่มีแท็ก a แค่ 2 ตัวและไม่มีลิงก์บทความเลย = เป็นหน้าฟอร์มค้นหา ASP.NET ต้องส่ง POST พร้อม ViewState ถึงจะได้ข้อมูล ไม่ใช่หน้ารวมข่าว"
     }

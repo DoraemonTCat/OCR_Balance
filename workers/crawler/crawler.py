@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import threading
 import time
@@ -33,6 +34,11 @@ _BOILERPLATE_TAGS = ("nav", "header", "footer", "script", "style", "aside",
 #: ลิงก์ที่ยาวเกิน 20 ตัวอักษรบนโดเมนเดียวกัน ถือว่าน่าจะเป็นบทความ
 #: ใช้เมื่อแหล่งข่าวไม่ได้ตั้ง link_pattern ไว้ (คู่มือหน้า 3 ขั้น 1)
 _MIN_ARTICLE_PATH_LEN = 20
+
+#: เวลารอก่อนลองใหม่เมื่อเว็บตอบ 429 โดยไม่ได้บอก Retry-After มาด้วย
+DEFAULT_RETRY_WAIT = 5.0
+#: เพดานการรอ กันเว็บที่ตอบ Retry-After มาเป็นชั่วโมงแล้วทำให้ทั้งรอบค้าง
+MAX_RETRY_WAIT = 30.0
 
 #: ลิงก์ที่ชี้ไปไฟล์เอกสาร ไม่ใช่หน้าเว็บ — ข้ามไปเลยไม่ต้องดาวน์โหลด
 #: feed ของ PMDA และ FDA มีลิงก์แบบนี้ปนมา
@@ -125,16 +131,36 @@ class Fetcher:
 
     # ---------- การดึง ----------
 
+    def _retry_after(self, resp):
+        """อ่านว่าเว็บขอให้รอกี่วินาทีก่อนลองใหม่
+
+        429 แปลว่า "ช้าลงหน่อย" ไม่ใช่ "ห้ามเข้า" การรอตามที่เขาบอกแล้วลองใหม่
+        จึงสุภาพกว่าการยอมแพ้ทันที — บางเว็บอย่าง EMA หน่วง 1 วินาทีไม่พอ
+        """
+        raw = resp.headers.get("retry-after", "")
+        try:
+            return min(float(raw), MAX_RETRY_WAIT)
+        except ValueError:
+            return DEFAULT_RETRY_WAIT
+
     def get(self, url):
         """ดึง URL หนึ่งเส้น คืน httpx.Response
 
         ขึ้น BlockedError เมื่อ robots.txt ห้าม หรือเว็บตอบ 401/403/429
+        กรณี 429 จะรอตามที่เว็บบอกแล้วลองใหม่หนึ่งครั้งก่อน
         """
         if not self.allowed(url):
             raise BlockedError(f"robots.txt ห้ามดึง {url}")
 
-        self._wait_for_host(urlparse(url).netloc)
+        host = urlparse(url).netloc
+        self._wait_for_host(host)
         resp = self._client.get(url)
+
+        if resp.status_code == 429:
+            time.sleep(self._retry_after(resp))
+            self._wait_for_host(host)
+            resp = self._client.get(url)
+
         if resp.status_code in (401, 403, 429):
             raise BlockedError(f"เว็บปฏิเสธด้วย HTTP {resp.status_code}")
         resp.raise_for_status()
@@ -247,18 +273,113 @@ def extract_links(html, base_url, link_pattern=None, search_scripts=True):
 
 # ---------- อ่าน RSS / Atom ----------
 
+#: ออฟเซ็ตเขตเวลาแบบไม่มีโคลอน (+0200) ซึ่ง fromisoformat ของ Python 3.10 ไม่รับ
+_TZ_NO_COLON_RE = re.compile(r"([+-]\d{2})(\d{2})$")
+
+
 def _parse_date(value):
-    """แปลงวันที่จาก feed เป็น ISO 8601 — คืน None ถ้าแปลงไม่ได้"""
+    """แปลงวันที่เป็น ISO 8601 — คืน None ถ้าแปลงไม่ได้
+
+    รองรับทั้ง RSS (Tue, 06 Oct 2026 13:09:00 EDT), Atom, meta tag ของหน้าเว็บ
+    และรูปแบบเฉพาะกิจที่บางเว็บใช้
+    """
     if not value:
         return None
+    value = value.strip()
+
     try:
-        return parsedate_to_datetime(value).isoformat()      # RSS: Tue, 06 Oct 2026 13:09:00 EDT
+        return parsedate_to_datetime(value).isoformat()          # RFC 2822 (RSS)
     except (TypeError, ValueError):
         pass
+
+    iso = value.replace("Z", "+00:00")
+    iso = _TZ_NO_COLON_RE.sub(r"\1:\2", iso)
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()   # Atom
+        return datetime.fromisoformat(iso).isoformat()           # ISO 8601 (Atom, meta)
     except ValueError:
-        return None
+        pass
+
+    for fmt in ("%a, %m/%d/%Y - %H:%M",    # FDA: Mon, 09/29/2025 - 15:03
+                "%d %B %Y",                # 30 September 2026
+                "%B %d, %Y",               # September 30, 2026
+                "%Y/%m/%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(value, fmt).isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+#: meta tag ที่เว็บต่าง ๆ ใช้บอกวันที่เผยแพร่ เรียงจากน่าเชื่อถือที่สุด
+#: og:updated_time กับ dateModified อยู่ท้ายสุด เพราะเป็นวันที่ *แก้ไข* ไม่ใช่วันที่เผยแพร่
+_DATE_META = (
+    ("property", "article:published_time"),
+    ("name", "dcterms.issued"),
+    ("name", "dcterms.date"),
+    ("itemprop", "datePublished"),
+    ("name", "date"),
+    ("name", "pubdate"),
+    ("property", "og:published_time"),
+)
+_DATE_META_FALLBACK = (
+    ("property", "og:updated_time"),
+    ("name", "dcterms.modified"),
+)
+
+
+def _jsonld_dates(soup):
+    """ดึงวันที่จาก JSON-LD ที่ฝังอยู่ในหน้า (บางเว็บมีแค่ที่นี่ เช่น HSA)"""
+    published, modified = [], []
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if isinstance(value, str):
+                    if key == "datePublished":
+                        published.append(value)
+                    elif key == "dateModified":
+                        modified.append(value)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            walk(json.loads(script.string or "{}"))
+        except (ValueError, TypeError):
+            continue
+    return published, modified
+
+
+def extract_published_at(html):
+    """หาวันที่เผยแพร่ของบทความ คืนสตริง ISO 8601 หรือ None
+
+    หน้ารวมข่าวมักไม่ได้บอกวันที่มาด้วย จึงต้องมาอ่านจากหน้าบทความเอง
+    ไล่หาตามลำดับ meta tag -> JSON-LD -> <time datetime> -> วันที่แก้ไขล่าสุด
+    """
+    soup = BeautifulSoup(html, "lxml")
+    published_ld, modified_ld = _jsonld_dates(soup)
+
+    def meta_values(table):
+        for attr, key in table:
+            tag = soup.find("meta", attrs={attr: key})
+            if tag and tag.get("content"):
+                yield tag["content"]
+
+    candidates = [
+        *meta_values(_DATE_META),
+        *published_ld,
+        *[t.get("datetime") for t in soup.find_all("time") if t.get("datetime")],
+        *meta_values(_DATE_META_FALLBACK),
+        *modified_ld,
+    ]
+    for value in candidates:
+        parsed = _parse_date(value)
+        if parsed:
+            return parsed
+    return None
 
 
 def parse_feed(xml_text, limit=None):
@@ -333,13 +454,72 @@ def extract_article(html):
     return candidates[-1]
 
 
+#: ความยาวขั้นต่ำที่ถือว่า <h1> เป็นหัวข้อข่าวจริง ไม่ใช่ชื่อเว็บ
+#:
+#: บางเว็บใส่ชื่อองค์กรไว้ใน <h1> ตัวแรก แล้วค่อยใส่หัวข้อข่าวใน <h1> ตัวถัดไป
+#: เช่น UNODC มี <h1>United Nations</h1> นำหน้าหัวข้อจริงเสมอ
+_MIN_TITLE_LEN = 25
+
+
 def extract_title(html):
+    """ดึงหัวข้อข่าวจากหน้าบทความ
+
+    เลือก <h1> ที่ยาวที่สุด เพราะหน้าที่มีหลาย <h1> มักเอาชื่อเว็บขึ้นก่อน
+    ถ้ายังสั้นผิดปกติให้ใช้ <title> แทน
+    """
     soup = BeautifulSoup(html, "lxml")
-    h1 = soup.find("h1")
-    if h1:
-        return normalize_text(h1.get_text(" ", strip=True)) or None
+
+    headings = [normalize_text(h.get_text(" ", strip=True)) for h in soup.find_all("h1")]
+    headings = [h for h in headings if h]
+    best = max(headings, key=len) if headings else None
+    if best and len(best) >= _MIN_TITLE_LEN:
+        return best
+
     if soup.title:
-        return normalize_text(soup.title.get_text(strip=True)) or None
+        # <title> มักมีชื่อเว็บต่อท้ายหลังขีดคั่น ตัดออกถ้าส่วนหน้ายาวพอ
+        raw = normalize_text(soup.title.get_text(strip=True))
+        head = re.split(r"\s+[|–—]\s+", raw)[0] if raw else ""
+        page_title = head if len(head) >= _MIN_TITLE_LEN else raw
+        if page_title:
+            return page_title
+
+    return best
+
+
+#: ชื่อเดือนภาษาอังกฤษที่โผล่ใน URL ของบางเว็บ เช่น /2026/October/
+_URL_MONTHS = {m.lower(): i for i, m in enumerate(
+    ["January", "February", "March", "April", "May", "June",
+     "July", "August", "September", "October", "November", "December"], start=1)}
+
+_URL_DATE_RES = (
+    re.compile(r"/(?P<y>20\d{2})/(?P<m>\d{1,2})/(?P<d>\d{1,2})(?:/|$|[.-])"),
+    re.compile(r"/(?P<y>20\d{2})/(?P<mon>[A-Za-z]+)/"),
+    re.compile(r"/(?P<y>20\d{2})/(?P<m>\d{1,2})(?:/|$)"),
+)
+
+
+def date_from_url(url):
+    """เดาวันที่จากเส้นทางใน URL เช่น /2026/October/ หรือ /2026/10/07/
+
+    ใช้เป็นทางเลือกสุดท้ายเมื่อหน้าเว็บไม่ได้บอกวันที่ไว้เลย
+    ยอมรับเฉพาะกรณีที่ได้อย่างน้อยปีกับเดือน — ปีอย่างเดียวคลาดเคลื่อนเกินไป
+    ค่าที่ได้จะถูกกำกับว่ามาจาก URL ไว้ในช่อง published_at_source
+    """
+    path = urlparse(url).path
+    for pattern in _URL_DATE_RES:
+        match = pattern.search(path)
+        if not match:
+            continue
+        parts = match.groupdict()
+        month = (_URL_MONTHS.get(parts["mon"].lower())
+                 if parts.get("mon") else int(parts["m"]))
+        if not month or not 1 <= month <= 12:
+            continue
+        day = int(parts["d"]) if parts.get("d") else 1
+        try:
+            return datetime(int(parts["y"]), month, day).isoformat()
+        except ValueError:
+            continue
     return None
 
 
@@ -411,6 +591,7 @@ def _fetch_article(item, fetcher, full_text):
         "url": item["url"],
         "title": item.get("title"),
         "published_at": item.get("published_at"),
+        "published_at_source": "feed" if item.get("published_at") else None,
         "summary": item.get("summary"),
         "text": None,
         "text_source": "rss_summary" if item.get("summary") else "none",
@@ -447,6 +628,20 @@ def _fetch_article(item, fetcher, full_text):
             page_title = extract_title(response.text)
             if page_title:
                 article["title"] = page_title
+
+        # หน้ารวมข่าวไม่ได้บอกวันที่มาด้วย จึงอ่านจากหน้าบทความเอง
+        if not article["published_at"]:
+            page_date = extract_published_at(response.text)
+            if page_date:
+                article["published_at"] = page_date
+                article["published_at_source"] = "page"
+
+        # บางเว็บไม่บอกวันที่ไว้ในหน้าเลย เหลือทางเดียวคือเดาจาก URL
+        if not article["published_at"]:
+            url_date = date_from_url(item["url"])
+            if url_date:
+                article["published_at"] = url_date
+                article["published_at_source"] = "url_path"
     except BlockedError as exc:
         article["error"] = f"blocked: {exc}"
     except Exception as exc:

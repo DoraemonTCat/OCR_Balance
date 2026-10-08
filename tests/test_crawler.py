@@ -13,7 +13,9 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from workers.crawler import (BlockedError, crawl_source, extract_article,
-                             extract_links, normalize_text, parse_feed)
+                             date_from_url, extract_links,
+                             extract_published_at, extract_title,
+                             normalize_source, normalize_text, parse_feed)
 
 
 class FakeResponse:
@@ -239,6 +241,106 @@ def test_rss_เก็บ_title_จาก_feed_ไม่ไปเอา_h1():
     result = crawl_source(source, FakeFetcher(pages))
 
     assert result["articles"][0]["title"] == "Voluntary Recall of Example Tablets"
+
+
+DATED_PAGES = {
+    "meta article:published_time": (
+        '<html><head><meta property="article:published_time" content="2026-09-30T11:32:50+0200">'
+        '</head><body><main>เนื้อข่าว</main></body></html>', "2026-09-30"),
+    "meta dcterms.issued": (
+        '<html><head><meta name="dcterms.issued" content="2026-10-07">'
+        '</head><body><main>เนื้อข่าว</main></body></html>', "2026-10-07"),
+    "JSON-LD dateModified": (
+        '<html><head><script type="application/ld+json">'
+        '{"@type":"WebPage","dateModified":"2026-09-30T06:31:43.672Z"}</script>'
+        '</head><body><main>เนื้อข่าว</main></body></html>', "2026-09-30"),
+    "time datetime": (
+        '<html><body><time datetime="2026-10-07T12:00:00Z">7 ต.ค.</time>'
+        '<main>เนื้อข่าว</main></body></html>', "2026-10-07"),
+    "รูปแบบเฉพาะของ FDA": (
+        '<html><head><meta property="article:published_time" content="Mon, 09/29/2025 - 15:03">'
+        '</head><body><main>เนื้อข่าว</main></body></html>', "2025-09-29"),
+}
+
+
+def test_extract_published_at_รองรับทุกรูปแบบที่เจอจริง():
+    for label, (html, expected) in DATED_PAGES.items():
+        got = extract_published_at(html)
+        assert got and got.startswith(expected), f"{label}: ได้ {got!r} ไม่ขึ้นต้นด้วย {expected}"
+
+
+def test_extract_published_at_ไม่มีวันที่คืน_none():
+    assert extract_published_at("<html><body><main>ไม่มีวันที่</main></body></html>") is None
+
+
+def test_html_เติมวันที่จากหน้าบทความ():
+    """หน้ารวมข่าวไม่ได้บอกวันที่ ต้องไปอ่านจากหน้าบทความเอง"""
+    base = "https://example.org/en"
+    listing = '<html><body><a href="/en/alert-recall/story">ข่าว</a></body></html>'
+    article = ('<html><head><meta name="dcterms.issued" content="2026-10-07"></head>'
+               '<body><h1>หัวข้อข่าว</h1><main>' + "เนื้อข่าวยาวพอสมควรสำหรับการทดสอบ " * 5
+               + '</main></body></html>')
+    source = {"name": "ทดสอบ", "url": base, "kind": "html",
+              "link_pattern": r"/en/alert-recall/", "extract_full_text": True}
+    result = crawl_source(source, FakeFetcher({base: listing,
+                                              "https://example.org/en/alert-recall/story": article}))
+    assert result["articles"][0]["published_at"].startswith("2026-10-07")
+
+
+def test_date_from_url_เดาวันที่จากเส้นทาง():
+    assert date_from_url("https://e.org/press/2026/October/story.html").startswith("2026-10-01")
+    assert date_from_url("https://e.org/news/2026/6/story").startswith("2026-06-01")
+    assert date_from_url("https://e.org/news/2026/10/07/story").startswith("2026-10-07")
+    # ปีอย่างเดียวคลาดเคลื่อนเกินไป ไม่รับ
+    assert date_from_url("https://e.org/press-releases/2026/story.html") is None
+    assert date_from_url("https://e.org/no-date/story") is None
+    # เดือนที่เป็นไปไม่ได้ต้องไม่ถูกรับ
+    assert date_from_url("https://e.org/news/2026/13/story") is None
+
+
+def test_extract_title_ข้ามชื่อเว็บที่อยู่ใน_h1_ตัวแรก():
+    html = ("<html><head><title>หัวข้อข่าวฉบับเต็มที่ยาวพอสมควร | ชื่อเว็บ</title></head>"
+            "<body><h1>United Nations</h1>"
+            "<h1>หัวข้อข่าวจริงที่ยาวกว่าและเจาะจงกว่ามาก</h1></body></html>")
+    assert extract_title(html) == "หัวข้อข่าวจริงที่ยาวกว่าและเจาะจงกว่ามาก"
+
+
+def test_extract_title_ใช้_title_เมื่อ_h1_สั้นเกินไป():
+    html = ("<html><head><title>หัวข้อข่าวฉบับเต็มที่ยาวพอสมควร | ชื่อเว็บ</title></head>"
+            "<body><h1>ชื่อเว็บ</h1></body></html>")
+    assert extract_title(html) == "หัวข้อข่าวฉบับเต็มที่ยาวพอสมควร"
+
+
+def test_published_at_source_บอกที่มาของวันที่():
+    base = "https://example.org/en"
+    listing = '<html><body><a href="/en/alert-recall/2026/October/story">ข่าว</a></body></html>'
+    page = ('<html><body><h1>หัวข้อข่าวที่ยาวพอจะถือว่าเป็นหัวข้อจริง</h1>'
+            '<main>' + "เนื้อข่าวสำหรับการทดสอบ " * 8 + '</main></body></html>')
+    url = "https://example.org/en/alert-recall/2026/October/story"
+    source = {"name": "ทดสอบ", "url": base, "kind": "html",
+              "link_pattern": r"/en/alert-recall/", "extract_full_text": True}
+    article = crawl_source(source, FakeFetcher({base: listing, url: page}))["articles"][0]
+
+    # หน้าไม่มี meta วันที่ จึงต้องตกมาเดาจาก URL และต้องบอกไว้ว่าเดามา
+    assert article["published_at"].startswith("2026-10-01")
+    assert article["published_at_source"] == "url_path"
+
+
+def test_normalize_source_เติมค่าปริยายและตรวจฟิลด์บังคับ():
+    filled = normalize_source({"name": "ทดสอบ", "url": "https://example.org"})
+    assert filled["kind"] == "html"
+    assert filled["max_articles"] == 30
+    assert filled["extract_full_text"] is False
+
+    for bad, reason in [({"url": "https://example.org"}, "name"),
+                        ({"name": "x"}, "url"),
+                        ({"name": "x", "url": "https://e.org", "kind": "json"}, "kind")]:
+        try:
+            normalize_source(bad)
+        except ValueError as exc:
+            assert reason in str(exc)
+        else:
+            raise AssertionError(f"ควรขึ้น ValueError เพราะ {reason}")
 
 
 def test_parse_feed_อ่านรายการและแปลงวันที่():
