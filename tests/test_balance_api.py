@@ -16,7 +16,7 @@ from django.test import Client
 from openpyxl import load_workbook
 from rest_framework import status
 
-from apps.balance.models import BalanceDocument, DocumentStatus
+from apps.balance.models import DocumentStatus
 from workers import form_layout
 from workers.balance_parser import LedgerRow
 from workers.balance_pipeline import DocumentResult, PageOutcome

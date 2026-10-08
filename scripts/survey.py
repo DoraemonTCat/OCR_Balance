@@ -30,18 +30,17 @@ import pathlib
 import httpx
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 
-from workers.crawler.net import ssl_context
+from workers.crawler.net import HOST_DELAY, TIMEOUT, USER_AGENT, ssl_context
 
 # เราเลือก parser เองตาม kind อยู่แล้ว (xml สำหรับ feed, lxml สำหรับ HTML)
 # เตือนซ้ำเฉพาะกรณีเว็บส่ง content-type ไม่ตรงกับ kind ที่ตั้งไว้ ซึ่งเรารายงานใน parser_mismatch แทน
 warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 
-UA = "HerbRiskBot/1.0"
+# ใช้ค่าเดียวกับตัว crawler จริง จะได้ไม่เพี้ยนกันเมื่อมีการแก้
+UA = USER_AGENT
 UA_BROWSER = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-TIMEOUT = 20.0
-HOST_DELAY = 1.0
 BKK = timezone(timedelta(hours=7))
 
 _host_lock = defaultdict(threading.Lock)

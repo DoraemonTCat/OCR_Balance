@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT))
 SOURCES_FILE = ROOT / "workers" / "crawler" / "sources.json"
 OUTPUT_DIR = ROOT / "data" / "crawl"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-import json, re, time
+import time
 from collections import Counter
 from urllib.parse import urljoin, urlparse
 import httpx

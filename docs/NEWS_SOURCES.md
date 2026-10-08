@@ -114,7 +114,6 @@ D:\Web_scraping\
 ├── SURVEY.md                 ← รายงานฉบับนี้
 ├── survey.py                 ← สคริปต์สำรวจ: robots/HTTP/RSS/JS
 ├── probe_feeds.py            ← ไล่ทดสอบ URL ที่คาดว่าเป็น feed 35 เส้น
-├── probe2.py                 ← ตามเก็บ feed ที่ยังหาไม่เจอ
 ├── probe_links.py            ← วิเคราะห์โครงสร้างลิงก์เพื่อหา link_pattern
 └── output/
     ├── survey_report.json    ← ผลดิบรายเว็บ

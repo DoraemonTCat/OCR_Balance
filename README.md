@@ -150,10 +150,9 @@ scripts/
   setup.ps1 migrate.ps1 local-run.ps1 test.ps1
   setup_certs.py         แก้ปัญหา TLS ตอนโหลดโมเดล
   survey.py              ตรวจความพร้อมของแหล่งข่าว
-  probe_feeds.py probe2.py probe_links.py
+  probe_feeds.py probe_links.py
                          ค้น RSS feed และวิเคราะห์โครงสร้าง URL
-  make_sample.py demo_match.py
-                         สร้างผลลัพธ์ตัวอย่าง และสาธิตการจับคู่คำสำคัญ
+  demo_match.py          สาธิตการจับคู่คำสำคัญกับผลลัพธ์
 docs/
   BALANCE_API.md         สัญญา API
   OCR_THAI.md            ข้อจำกัดภาษาไทย
