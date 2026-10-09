@@ -26,7 +26,7 @@ from .aggregate import by_keyword
 from .matcher import compile_keyword, count_in, count_keywords
 from .normalize import normalize_text, normalize_thai
 from .runner import (OPTIONAL_FIELDS, REQUIRED_FIELDS, Canceller,
-                     load_sources, normalize_source, run)
+                     load_keywords, load_sources, normalize_source, run)
 
 __all__ = [
     "BlockedError",
@@ -45,6 +45,7 @@ __all__ = [
     "find_next_page",
     "OPTIONAL_FIELDS",
     "REQUIRED_FIELDS",
+    "load_keywords",
     "load_sources",
     "normalize_source",
     "normalize_text",

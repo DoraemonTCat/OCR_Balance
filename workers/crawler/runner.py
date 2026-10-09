@@ -58,6 +58,19 @@ def normalize_source(source):
     return merged
 
 
+def load_keywords(path=None):
+    """อ่านคำสำคัญจาก keywords.json
+
+    เหมือน sources.json ไฟล์นี้เป็น *ข้อมูลตั้งต้น* สำหรับทดลองรันและเทสต์
+    เมื่อใช้งานจริงให้อ่านคำสำคัญจากฐานข้อมูลแล้วส่ง list เข้า by_keyword() โดยตรง
+
+    รับได้ทั้งไฟล์ที่เป็น list ของสตริง และไฟล์ที่เป็น object ที่มีคีย์ keywords
+    """
+    path = pathlib.Path(path) if path else BASE / "keywords.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    return config["keywords"] if isinstance(config, dict) else config
+
+
 def load_sources(path=None, statuses=("ready",)):
     """อ่านแหล่งข่าวจาก sources.json
 

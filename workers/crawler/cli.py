@@ -18,12 +18,13 @@ import sys
 from datetime import datetime
 
 from .aggregate import by_keyword
-from .runner import OUTPUT_DIR, load_sources, run
+from .runner import BASE, OUTPUT_DIR, load_keywords, load_sources, run
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="ดึงข่าวจากแหล่งที่ตั้งไว้ แล้วเขียนเป็น JSON")
-    parser.add_argument("--out", help="ไฟล์ผลลัพธ์ (ค่าปริยาย output/crawl_<เวลา>.json)")
+    parser.add_argument("--out",
+                        help="ไฟล์ผลลัพธ์ (ค่าปริยาย data/crawl/keywords_<เวลา>.json)")
     parser.add_argument("--max-articles", type=int, help="จำกัดจำนวนบทความต่อแหล่ง")
     parser.add_argument("--only", help="ดึงเฉพาะแหล่งที่ชื่อมีข้อความนี้")
     parser.add_argument("--status", default="ready",
@@ -31,12 +32,20 @@ def main(argv=None):
     parser.add_argument("--max-pages", type=int,
                         help="ไล่อ่านหน้าถัดไปได้กี่หน้า รวมหน้าแรก (ค่าปริยาย 3)")
     parser.add_argument("--keywords",
-                        help="ไฟล์ JSON ของคำสำคัญ ใส่แล้วจะเขียนไฟล์ผลนับคำเพิ่มให้")
+                        help="ไฟล์ JSON ของคำสำคัญ (ค่าปริยาย workers/crawler/keywords.json)")
     parser.add_argument("--since-days", type=int,
                         help="นับเฉพาะข่าวที่เผยแพร่ภายใน N วันล่าสุด (ค่าปริยายนับทุกข่าว)")
     parser.add_argument("--no-robots", action="store_true",
                         help="ข้ามการตรวจ robots.txt (ใช้ตอนทดสอบเท่านั้น ห้ามใช้จริง)")
     args = parser.parse_args(argv)
+
+    # คอนโซล Windows ภาษาไทยใช้ cp874 ซึ่งไม่มีอักขระพิเศษหลายตัว
+    # ตั้งไว้ตั้งแต่ต้นเพื่อให้ครอบคลุมทุก print รวมข้อความผิดพลาดด้วย
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
 
     statuses = None if args.status == "all" else tuple(s.strip() for s in args.status.split(","))
     _, sources = load_sources(statuses=statuses)
@@ -47,30 +56,33 @@ def main(argv=None):
         print("ไม่มีแหล่งข่าวที่ตรงเงื่อนไข", file=sys.stderr)
         return 1
 
-    print(f"เริ่มดึง {len(sources)} แหล่ง...")
+    # อ่านคำสำคัญ *ก่อน* เริ่มดึงเว็บ การดึงใช้เวลาสิบกว่านาที
+    # ถ้าไฟล์ผิดแล้วไปพังตอนท้าย เท่ากับเสียเวลารอไปฟรี ๆ ทั้งรอบ
+    try:
+        keywords = load_keywords(args.keywords)
+    except FileNotFoundError as exc:
+        print(f"ไม่พบไฟล์คำสำคัญ: {exc.filename}", file=sys.stderr)
+        print(f"ค่าปริยายคือ {BASE / 'keywords.json'}", file=sys.stderr)
+        return 1
+    except (ValueError, KeyError) as exc:
+        print(f"ไฟล์คำสำคัญอ่านไม่ได้: {exc}", file=sys.stderr)
+        return 1
+    if not keywords:
+        print("ไฟล์คำสำคัญว่างเปล่า", file=sys.stderr)
+        return 1
+
+    print(f"เริ่มดึง {len(sources)} แหล่ง | คำสำคัญ {len(keywords)} คำ...")
     report = run(sources, max_articles=args.max_articles, max_pages=args.max_pages,
                  respect_robots=not args.no_robots)
 
+    # ผลลัพธ์ที่ส่งมอบคือผลนับคำสำคัญอย่างเดียว ผลดิบใช้เป็นข้อมูลกลางในหน่วยความจำ
+    # ผู้เรียกที่อยากได้ผลดิบ (ลิงก์บทความ เนื้อหา วันที่) ให้เรียก runner.run() ตรง ๆ
+    counted = by_keyword(report, keywords, since_days=args.since_days)
+
     out = pathlib.Path(args.out) if args.out else (
-        OUTPUT_DIR / f"crawl_{datetime.now().strftime('%Y%m%dT%H%M')}.json")
+        OUTPUT_DIR / f"keywords_{datetime.now().strftime('%Y%m%dT%H%M')}.json")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    keyword_out = None
-    if args.keywords:
-        config = json.loads(pathlib.Path(args.keywords).read_text(encoding="utf-8"))
-        keywords = config["keywords"] if isinstance(config, dict) else config
-        counted = by_keyword(report, keywords, since_days=args.since_days)
-        keyword_out = out.with_name(out.name.replace("crawl_", "keywords_", 1))
-        if keyword_out == out:
-            keyword_out = out.with_name(f"keywords_{out.name}")
-        keyword_out.write_text(json.dumps(counted, ensure_ascii=False, indent=2),
-                               encoding="utf-8")
-
-    try:
-        sys.stdout.reconfigure(errors="replace")   # คอนโซลไทยเป็น cp874 พิมพ์บางอักขระไม่ได้
-    except Exception:
-        pass
+    out.write_text(json.dumps(counted, ensure_ascii=False, indent=2), encoding="utf-8")
 
     s = report["summary"]
     print()

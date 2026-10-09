@@ -91,13 +91,17 @@ def article_text(article):
     return " ".join(p for p in parts if p)
 
 
-def count_keywords(articles, keywords):
+def count_keywords(articles, keywords, compiled=None):
     """นับทุก keyword กับบทความทั้งชุด คืน {ชื่อ keyword: จำนวนครั้ง}
 
     ดึงเว็บครั้งเดียวแล้วนับทุกคำในรอบเดียว ไม่วนดึงใหม่ทีละคำ
     การดึงเว็บคือส่วนที่ช้า ส่วนการนับทำบนข้อความที่อยู่ในหน่วยความจำแล้ว
+
+    compiled: ผลของ compile_keyword ที่เตรียมไว้แล้ว ส่งมาได้เมื่อต้องเรียก
+              ฟังก์ชันนี้หลายรอบ จะได้ไม่คอมไพล์ regex ชุดเดิมซ้ำทุกรอบ
     """
-    compiled = [compile_keyword(k) for k in keywords]
+    if compiled is None:
+        compiled = [compile_keyword(k) for k in keywords]
     totals = {name: 0 for name, _ in compiled}
 
     for article in articles:

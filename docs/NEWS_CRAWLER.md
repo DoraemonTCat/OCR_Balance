@@ -17,7 +17,8 @@ pip install -r requirements.txt
 python -m workers.crawler.cli
 ```
 
-ดึงทุกแหล่งที่สถานะ `ready` (19 แหล่ง) แล้วเขียน `data/crawl/crawl_<เวลา>.json`
+ดึงทุกแหล่งที่สถานะ `ready` (21 แหล่ง) นับคำสำคัญจาก `workers/crawler/keywords.json`
+แล้วเขียน `data/crawl/keywords_<เวลา>.json`
 
 ตัวเลือกอื่น:
 
@@ -33,16 +34,16 @@ python -m workers.crawler.cli --only "US FDA"
 python -m workers.crawler.cli --status all
 ```
 
-นับคำสำคัญด้วย — จะได้ไฟล์ผลนับเพิ่มอีกหนึ่งไฟล์:
+ใช้ไฟล์คำสำคัญอื่น:
 
 ```bash
-python -m workers.crawler.cli --keywords scripts/keywords.json
+python -m workers.crawler.cli --keywords path/to/keywords.json
 ```
 
 นับเฉพาะข่าวที่เผยแพร่ภายใน 1 วันล่าสุด:
 
 ```bash
-python -m workers.crawler.cli --keywords scripts/keywords.json --since-days 1
+python -m workers.crawler.cli --since-days 1
 ```
 
 เทสต์ (ไม่ยิงเว็บจริง) — รันได้เลยไม่ต้องมี pytest:
@@ -112,7 +113,6 @@ scripts/                  เครื่องมือเสริม ไม�
 ├── survey.py             ตรวจความพร้อมของแหล่งข่าวทั้งหมด
 ├── probe_feeds.py        ค้นหา RSS/Atom feed ที่เว็บไม่ได้ประกาศไว้
 ├── probe_links.py        วิเคราะห์โครงสร้าง URL เพื่อกำหนด link_pattern
-├── demo_match.py         สาธิตการจับคู่คำสำคัญกับผลลัพธ์
 └── keywords.json         ชุดคำสำคัญสำหรับใช้ทดสอบ
 
 docs/
@@ -226,13 +226,13 @@ from workers.crawler import run
 report = run(sources)          # ได้ dict ไม่ผ่านไฟล์
 ```
 
-**ทาง B — อ่านไฟล์ JSON** (ใช้ข้อมูลตั้งต้นใน `sources.json`)
+**ทาง B — อ่านไฟล์ JSON** (ใช้ข้อมูลตั้งต้นใน `sources.json` กับ `keywords.json`)
 
 ```bash
 python -m workers.crawler.cli
 ```
 
-แล้วอ่าน `data/crawl/crawl_*.json`
+แล้วอ่าน `data/crawl/keywords_*.json`
 
 **เรียกทีละแหล่ง** (เช่นเมื่ออยากคุม transaction เอง)
 
@@ -313,8 +313,9 @@ report = run(sources, canceller=c)
 `url` เป็นระดับเว็บ ไม่ใช่ระดับบทความ จึง**เทียบข้ามรอบไม่ได้**
 บอกไม่ได้ว่า `count` ที่เพิ่มขึ้นมาจากข่าวใหม่ หรือจากข่าวเดิมที่ถูกนับซ้ำ
 
-ถ้าวันหนึ่งต้องการแบบนั้น ต้องใช้ลิงก์บทความซึ่งเก็บอยู่ใน `crawl_<เวลา>.json`
-ที่สร้างคู่กันทุกรอบ — ตรงกับตาราง `KeywordSource` ในคู่มือหน้า 2 ที่ unique บน `(keyword, link)`
+ถ้าวันหนึ่งต้องการแบบนั้น ต้องใช้ลิงก์บทความ ซึ่ง `runner.run()` คืนมาครบอยู่แล้ว
+แต่ CLI ไม่ได้เขียนลงไฟล์ ผู้เรียกที่ต้องการต้องเรียก `run()` เองแล้วเก็บผลไว้
+— ตรงกับตาราง `KeywordSource` ในคู่มือหน้า 2 ที่ unique บน `(keyword, link)`
 
 ---
 

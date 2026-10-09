@@ -24,8 +24,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from .matcher import article_text, compile_keyword, count_in
-from .normalize import normalize_text
+from .matcher import compile_keyword, count_keywords
 
 
 def _within(article, cutoff):
@@ -52,6 +51,7 @@ def by_keyword(report, keywords, since_days=None):
     since_days: นับเฉพาะบทความที่เผยแพร่ภายใน N วันล่าสุด
                 None = นับทุกบทความที่ดึงมาได้ (ค่าปริยาย)
     """
+    # คอมไพล์ครั้งเดียวแล้วใช้ซ้ำทุกแหล่ง
     compiled = [compile_keyword(k) for k in keywords]
     cutoff = None
     if since_days is not None:
@@ -59,22 +59,18 @@ def by_keyword(report, keywords, since_days=None):
 
     # url ที่รายงานคือหน้าเว็บที่คนเปิดดูได้ ไม่ใช่ URL ของ feed xml
     # ซึ่ง original_url เก็บไว้อยู่แล้วสำหรับแหล่งที่เปลี่ยนไปใช้ feed
-    rows = []
+    per_source = []
     for source in report["sources"]:
         display_url = source.get("original_url") or source["url"]
         articles = source.get("articles", [])
         if cutoff is not None:
             articles = [a for a in articles if _within(a, cutoff)]
-        texts = [normalize_text(article_text(a)) for a in articles]
-        rows.append((display_url, [t for t in texts if t]))
+        per_source.append((display_url, count_keywords(articles, keywords, compiled)))
 
     return [
         {
             "keysword": name,
-            "ref": [
-                {"url": url, "count": sum(count_in(t, patterns) for t in texts)}
-                for url, texts in rows
-            ],
+            "ref": [{"url": url, "count": totals[name]} for url, totals in per_source],
         }
-        for name, patterns in compiled
+        for name, _ in compiled
     ]

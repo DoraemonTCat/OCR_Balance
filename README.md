@@ -140,6 +140,9 @@ workers/
     runner.py            ควบคุมการรันหนึ่งรอบ ดึงหลายแหล่งพร้อมกัน
     cli.py               ส่วนติดต่อบรรทัดคำสั่ง
     sources.json         นิยามแหล่งข่าว 31 รายการ
+    keywords.json        คำสำคัญสำหรับทดลองรัน
+    matcher.py           นับจำนวนครั้งที่คำสำคัญปรากฏ
+    aggregate.py         พลิกผลเป็นรูปแบบเรียงตามคำสำคัญ
 config/settings/
   base.py                ค่ากลาง
   development.py         PostgreSQL ตาม .env
@@ -152,13 +155,12 @@ scripts/
   survey.py              ตรวจความพร้อมของแหล่งข่าว
   probe_feeds.py probe_links.py
                          ค้น RSS feed และวิเคราะห์โครงสร้าง URL
-  demo_match.py          สาธิตการจับคู่คำสำคัญกับผลลัพธ์
 docs/
   BALANCE_API.md         สัญญา API
   OCR_THAI.md            ข้อจำกัดภาษาไทย
   NEWS_CRAWLER.md        การใช้งานตัวดึงข่าว
   NEWS_SOURCES.md        ผลสำรวจความพร้อมของแหล่งข่าว
-data/crawl/              ผลการดึงข่าวแต่ละรอบ (ไม่เข้า git)
+data/crawl/              ผลนับคำสำคัญแต่ละรอบ (ไม่เข้า git)
 ```
 
 เส้นทางทั้งหมดที่เปิดให้เรียก: `/api/v1/balance/*`, `/health`, `/ready`
