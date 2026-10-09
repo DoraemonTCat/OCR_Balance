@@ -523,9 +523,83 @@ def date_from_url(url):
     return None
 
 
+# ---------- เดินไปหน้าถัดไป ----------
+
+#: จำนวนหน้าสูงสุดที่ไล่อ่านต่อหนึ่งแหล่ง รวมหน้าแรกด้วย
+MAX_PAGES = 3
+
+#: ข้อความบนลิงก์ที่แปลว่า "หน้าถัดไป" ทั้งไทยและอังกฤษ
+#: เทียบแบบตรงทั้งข้อความ ไม่ใช่ substring เพราะคำว่า next โผล่ในพาดหัวข่าวได้
+_NEXT_LABELS = {
+    "next", "next page", "next >", "next »", "older", "older posts",
+    "ถัดไป", "หน้าถัดไป", "หน้าต่อไป", ">", "»", "›", "→",
+}
+
+
+def find_next_page(html, base_url):
+    """หา URL ของหน้าถัดไป คืน None ถ้าไม่มี
+
+    ไล่ตามลำดับความน่าเชื่อถือ:
+      1. <link rel="next"> ใน <head> — มาตรฐาน ชัดเจนที่สุด
+      2. <a rel="next"> — เว็บส่วนใหญ่ที่ทำ pagination ถูกต้องใช้อันนี้
+      3. ข้อความบนลิงก์ที่แปลว่าถัดไป
+      4. aria-label หรือ title ที่บอกว่าเป็นหน้าถัดไป
+    """
+    soup = BeautifulSoup(html, "lxml")
+
+    for tag in soup.find_all(["link", "a"], rel=True, href=True):
+        rels = [r.lower() for r in (tag.get("rel") or [])]
+        if "next" in rels:
+            return _clean_url(base_url, tag["href"])
+
+    for anchor in soup.find_all("a", href=True):
+        label = normalize_text(anchor.get_text(" ", strip=True)).lower()
+        if label in _NEXT_LABELS:
+            return _clean_url(base_url, anchor["href"])
+        for attr in ("aria-label", "title"):
+            value = (anchor.get(attr) or "").strip().lower()
+            if value in _NEXT_LABELS:
+                return _clean_url(base_url, anchor["href"])
+
+    return None
+
+
+def _collect_links(source, response, base_url, fetcher, limit, max_pages):
+    """เก็บลิงก์บทความจากหน้ารวมข่าว ไล่ตามหน้าถัดไปได้ถึง max_pages
+
+    หยุดเมื่อครบจำนวนหน้า ครบจำนวนบทความ ไม่มีหน้าถัดไป
+    หรือหน้าถัดไปวนกลับมาที่เดิม
+    """
+    pattern = source.get("link_pattern")
+    found, seen = [], set()
+    page_url, html, pages_read = base_url, response.text, 1
+
+    while True:
+        for link in extract_links(html, page_url, pattern):
+            if link["url"] not in seen:
+                seen.add(link["url"])
+                found.append(link)
+
+        if len(found) >= limit or pages_read >= max_pages:
+            break
+
+        next_url = find_next_page(html, page_url)
+        # วนกลับหน้าเดิมหรือหน้าที่อ่านไปแล้ว = ไม่ใช่ pagination จริง
+        if not next_url or next_url == page_url:
+            break
+        try:
+            next_response = fetcher.get(next_url)
+        except (BlockedError, Exception):
+            break
+        page_url, html = str(next_response.url), next_response.text
+        pages_read += 1
+
+    return found[:limit], pages_read
+
+
 # ---------- ดึงแหล่งข่าวหนึ่งแหล่งจนจบ ----------
 
-def crawl_source(source, fetcher, should_stop=None, max_articles=None):
+def crawl_source(source, fetcher, should_stop=None, max_articles=None, max_pages=None):
     """ดึงแหล่งข่าวหนึ่งแหล่ง คืน dict พร้อมบทความทั้งหมด
 
     source: dict จาก sources.json (ต้องมี name, url, kind อย่างน้อย)
@@ -535,17 +609,21 @@ def crawl_source(source, fetcher, should_stop=None, max_articles=None):
     status มีได้ 3 ค่า: ok / blocked / error
     """
     limit = max_articles or source.get("max_articles") or 30
+    pages = max_pages or source.get("max_pages") or MAX_PAGES
     full_text = bool(source.get("extract_full_text"))
     stop = should_stop or (lambda: False)
 
     result = {
         "name": source["name"],
         "url": source["url"],
+        # URL ของหน้าเว็บที่คนเปิดดูได้ ต่างจาก url เมื่อแหล่งนั้นเปลี่ยนไปใช้ feed
+        "original_url": source.get("original_url"),
         "kind": source.get("kind", "html"),
         "group": source.get("group"),
         "status": "ok",
         "error": None,
         "cancelled": False,
+        "pages_read": 0,
         "articles": [],
     }
 
@@ -554,11 +632,14 @@ def crawl_source(source, fetcher, should_stop=None, max_articles=None):
         base_url = str(response.url)
 
         if result["kind"] == "rss":
+            # feed ส่งรายการมาทีเดียวจบ ไม่มีหน้าถัดไปให้เดิน
             items = parse_feed(response.text, limit)
             for item in items:
                 item["title_from"] = "feed"
+            result["pages_read"] = 1
         else:
-            links = extract_links(response.text, base_url, source.get("link_pattern"))[:limit]
+            links, pages = _collect_links(source, response, base_url, fetcher, limit, pages)
+            result["pages_read"] = pages
             # title ที่ได้ตรงนี้คือข้อความในแท็ก <a> ซึ่งมักเป็นปุ่ม ("Read highlights")
             # หรือมีวันที่ซ้ำติดมา จึงถือเป็นแค่ตัวสำรอง ของจริงเอาจาก <h1> ในหน้าบทความ
             items = [{"url": l["url"], "title": l["title"], "published_at": None,

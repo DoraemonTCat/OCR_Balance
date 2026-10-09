@@ -30,8 +30,10 @@ OPTIONAL_FIELDS = {
     "kind": "html",              # "html" หรือ "rss"
     "link_pattern": None,        # regex คัดลิงก์บทความ ใช้เฉพาะ kind=html
     "max_articles": 30,
+    "max_pages": 3,              # ไล่อ่านหน้าถัดไปได้กี่หน้า รวมหน้าแรก
     "extract_full_text": False,  # True = ตามเข้าไปดึงเนื้อข่าวเต็ม
     "group": None,               # ป้ายกำกับ ไม่มีผลต่อการทำงาน
+    "original_url": None,        # URL หน้าเว็บที่คนเปิดดู ใช้รายงานในผลลัพธ์
 }
 
 
@@ -90,7 +92,8 @@ class Canceller:
         return self._event.is_set()
 
 
-def run(sources=None, *, max_articles=None, canceller=None, respect_robots=True):
+def run(sources=None, *, max_articles=None, max_pages=None, canceller=None,
+        respect_robots=True):
     """ดึงทุกแหล่งข่าวหนึ่งรอบ คืน dict ตามรูปแบบที่ตกลงกับฝั่ง backend
 
     รอบถือว่า SUCCESS เมื่อมีอย่างน้อยหนึ่งแหล่งสำเร็จ ไม่มีเลย = FAILED
@@ -105,7 +108,8 @@ def run(sources=None, *, max_articles=None, canceller=None, respect_robots=True)
     with Fetcher(respect_robots=respect_robots) as fetcher:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
             results = list(pool.map(
-                lambda s: crawl_source(s, fetcher, should_stop=stop, max_articles=max_articles),
+                lambda s: crawl_source(s, fetcher, should_stop=stop,
+                                       max_articles=max_articles, max_pages=max_pages),
                 sources,
             ))
 
@@ -113,6 +117,7 @@ def run(sources=None, *, max_articles=None, canceller=None, respect_robots=True)
     for item in results:
         counts[item["status"]] += 1
     articles = sum(len(r["articles"]) for r in results)
+    pages = sum(r.get("pages_read", 0) for r in results)
     with_text = sum(1 for r in results for a in r["articles"] if a.get("text"))
 
     return {
@@ -127,6 +132,7 @@ def run(sources=None, *, max_articles=None, canceller=None, respect_robots=True)
             **counts,
             "articles_total": articles,
             "articles_with_full_text": with_text,
+            "pages_read": pages,
         },
         "sources": results,
     }

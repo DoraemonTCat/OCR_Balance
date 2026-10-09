@@ -13,7 +13,8 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from workers.crawler import (BlockedError, crawl_source, extract_article,
-                             date_from_url, extract_links,
+                             by_keyword, compile_keyword, count_keywords,
+                             date_from_url, extract_links, find_next_page,
                              extract_published_at, extract_title,
                              normalize_source, normalize_text, parse_feed)
 
@@ -425,6 +426,144 @@ def test_crawl_source_หยุดได้เมื่อผู้ใช้ส�
     assert result["cancelled"] is True
     assert result["articles"] == []
 
+
+
+# ---------- การนับคำสำคัญ ----------
+
+def _count(keyword, text):
+    _, patterns = compile_keyword(keyword)
+    return sum(len(p.findall(text)) for p in patterns)
+
+
+def test_นับคำอังกฤษตรงทั้งคำและนับพหูพจน์():
+    assert _count("Drug Recall", "Drug Recalls announced. One drug recall today.") == 2
+    # ต้องไม่ไปจับคำที่มีคำนี้เป็นส่วนหนึ่ง
+    assert _count("Recall", "The product was Recalled yesterday.") == 0
+
+
+def test_นับคำไทยแบบ_substring():
+    # ไทยไม่มีช่องว่างระหว่างคำ จึงต้องจับแบบ substring
+    assert _count("ยาอันตราย", "พบยาอันตรายในตลาด ยาอันตรายชนิดนี้") == 2
+    assert _count("กองยาเสพติด", "สำนักงานกองยาเสพติดแจ้ง") == 1
+
+
+def test_คำที่มีวงเล็บนับทั้งสองส่วน():
+    # วงเล็บเป็นตัวย่อ
+    assert _count("Herbal adverse reactions (HARs)",
+                  "HARs are common. Herbal adverse reactions happen.") == 2
+    # วงเล็บเป็นคำแปลไทย — ต้องนับได้ทั้งฝั่งอังกฤษและฝั่งไทย
+    kw = "Nitrosamines (กลุ่มสารไนโตรซามีน)"
+    assert _count(kw, "Nitrosamines found in drug.") == 1
+    assert _count(kw, "พบกลุ่มสารไนโตรซามีนในยา") == 1
+
+
+def test_คำที่ลงท้ายด้วยเครื่องหมายยังหาเจอ():
+    """ ใช้ไม่ได้กับคำที่ขอบไม่ใช่ตัวอักษร"""
+    assert _count("INS: 101(iii)", "INS: 101(iii) listed here") == 1
+
+
+def test_count_keywords_นับทุกคำในรอบเดียว():
+    articles = [
+        {"title": "Voluntary Recall of tablets", "summary": None, "text": "A voluntary recall."},
+        {"title": "พบยาอันตราย", "summary": None, "text": None},
+    ]
+    totals = count_keywords(articles, ["Voluntary Recall", "ยาอันตราย", "NDMA"])
+    assert totals["Voluntary Recall"] == 2
+    assert totals["ยาอันตราย"] == 1
+    assert totals["NDMA"] == 0      # ไม่เจอก็ต้องมีคีย์ ค่าเป็น 0
+
+
+# ---------- รูปแบบผลลัพธ์ตามคำสำคัญ ----------
+
+def test_by_keyword_รูปแบบตรงตามที่ตกลง():
+    report = {"sources": [
+        {"name": "ก", "url": "https://a.example/feed.xml",
+         "original_url": "https://a.example/",
+         "articles": [{"title": "Voluntary Recall", "summary": None, "text": None}]},
+        {"name": "ข", "url": "https://b.example/",
+         "articles": [{"title": "ไม่มีคำ", "summary": None, "text": None}]},
+    ]}
+    out = by_keyword(report, ["Voluntary Recall", "ยาอันตราย"])
+
+    assert [k["keysword"] for k in out] == ["Voluntary Recall", "ยาอันตราย"]
+    # ทุกคำต้องมี ref ครบทุกแหล่ง แหล่งที่ไม่เจอได้ 0 ไม่ถูกตัดทิ้ง
+    assert [r["url"] for r in out[0]["ref"]] == ["https://a.example/", "https://b.example/"]
+    assert [r["count"] for r in out[0]["ref"]] == [1, 0]
+    assert [r["count"] for r in out[1]["ref"]] == [0, 0]
+    assert set(out[0]["ref"][0]) == {"url", "count"}
+
+
+def test_by_keyword_กรองตามวันที่ได้():
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc).astimezone()
+    report = {"sources": [{
+        "name": "ก", "url": "https://a.example/",
+        "articles": [
+            {"title": "Voluntary Recall ใหม่", "summary": None, "text": None,
+             "published_at": now.isoformat()},
+            {"title": "Voluntary Recall เก่า", "summary": None, "text": None,
+             "published_at": (now - timedelta(days=30)).isoformat()},
+        ],
+    }]}
+    assert by_keyword(report, ["Voluntary Recall"])[0]["ref"][0]["count"] == 2
+    assert by_keyword(report, ["Voluntary Recall"], since_days=1)[0]["ref"][0]["count"] == 1
+
+
+# ---------- หน้าถัดไป ----------
+
+def test_find_next_page_อ่านจาก_rel_next():
+    html = '<html><head><link rel="next" href="/page/2"></head><body></body></html>'
+    assert find_next_page(html, "https://e.org/news") == "https://e.org/page/2"
+
+
+def test_find_next_page_อ่านจากข้อความบนลิงก์():
+    for label in ("Next", "ถัดไป", "›"):
+        html = f'<html><body><a href="/p2">{label}</a></body></html>'
+        assert find_next_page(html, "https://e.org/news") == "https://e.org/p2", label
+
+
+def test_find_next_page_ไม่สับสนกับคำว่า_next_ในพาดหัว():
+    html = '<html><body><a href="/x">What comes next for the recall</a></body></html>'
+    assert find_next_page(html, "https://e.org/news") is None
+
+
+def test_crawl_source_เดินหน้าถัดไปได้ตามเพดาน():
+    pages = {
+        "https://e.org/news": '<html><body><a href="/a/one">1</a>'
+                              '<a rel="next" href="/news?p=2">Next</a></body></html>',
+        "https://e.org/news?p=2": '<html><body><a href="/a/two">2</a>'
+                                  '<a rel="next" href="/news?p=3">Next</a></body></html>',
+        "https://e.org/news?p=3": '<html><body><a href="/a/three">3</a>'
+                                  '<a rel="next" href="/news?p=4">Next</a></body></html>',
+        "https://e.org/news?p=4": '<html><body><a href="/a/four">4</a></body></html>',
+    }
+    source = {"name": "ทดสอบ", "url": "https://e.org/news", "kind": "html",
+              "link_pattern": r"/a/", "extract_full_text": False}
+    result = crawl_source(source, FakeFetcher(pages))
+
+    # เพดาน 3 หน้า จึงต้องไม่ไปถึงหน้า 4
+    assert result["pages_read"] == 3
+    assert [a["url"] for a in result["articles"]] == [
+        "https://e.org/a/one", "https://e.org/a/two", "https://e.org/a/three"]
+
+
+def test_crawl_source_หยุดเดินหน้าเมื่อครบจำนวนบทความ():
+    pages = {
+        "https://e.org/news": '<html><body><a href="/a/one">1</a><a href="/a/two">2</a>'
+                              '<a rel="next" href="/news?p=2">Next</a></body></html>',
+        "https://e.org/news?p=2": '<html><body><a href="/a/three">3</a></body></html>',
+    }
+    source = {"name": "ทดสอบ", "url": "https://e.org/news", "kind": "html",
+              "link_pattern": r"/a/", "max_articles": 2}
+    result = crawl_source(source, FakeFetcher(pages))
+    assert result["pages_read"] == 1
+    assert len(result["articles"]) == 2
+
+
+def test_rss_ไม่เดินหน้าถัดไป():
+    source = {"name": "ทดสอบ", "url": "https://example.org/feed", "kind": "rss"}
+    result = crawl_source(source, FakeFetcher({"https://example.org/feed": FEED}))
+    assert result["pages_read"] == 1
 
 if __name__ == "__main__":
     passed = failed = 0
