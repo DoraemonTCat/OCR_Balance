@@ -31,6 +31,16 @@ from .normalize import normalize_text
 _BOILERPLATE_TAGS = ("nav", "header", "footer", "script", "style", "aside",
                      "form", "noscript", "iframe", "svg", "button")
 
+#: ส่วนประกอบของเว็บที่ไม่เคยเป็นรายการบทความ — เมนู หัวเว็บ ท้ายเว็บ แถบข้าง
+#:
+#: แยกจาก _BOILERPLATE_TAGS เพราะตอนเก็บลิงก์ต้องเหลือ <script> ไว้ให้
+#: search_scripts ใช้ค้นรายการข่าวที่โหลดด้วย JavaScript
+_CHROME_TAGS = ("nav", "header", "footer", "aside")
+
+#: ARIA role ที่มีความหมายเดียวกับแท็กข้างบน เว็บที่ใช้ <div role="navigation">
+#: แทน <nav> มีอยู่มาก ถ้าดูแต่ชื่อแท็กจะหลุด
+_CHROME_ROLES = frozenset(("navigation", "banner", "contentinfo", "search"))
+
 #: ลิงก์ที่ยาวเกิน 20 ตัวอักษรบนโดเมนเดียวกัน ถือว่าน่าจะเป็นบทความ
 #: ใช้เมื่อแหล่งข่าวไม่ได้ตั้ง link_pattern ไว้ (คู่มือหน้า 3 ขั้น 1)
 _MIN_ARTICLE_PATH_LEN = 20
@@ -222,11 +232,36 @@ def _candidate_from_script(raw, base_url):
     return _clean_url(base_url, raw)
 
 
+def _anchors_outside_chrome(soup):
+    """<a href> ที่ไม่ได้อยู่ในเมนู หัวเว็บ ท้ายเว็บ หรือแถบข้าง
+
+    extract_article ตัดส่วนพวกนี้ออกก่อนอ่านเนื้อข่าวอยู่แล้ว แต่ตอนเก็บลิงก์
+    ไม่เคยตัด จึงไล่เก็บลิงก์เมนูมาเป็น "บทความ" ด้วย ตัวกรองสำรองที่มีคือ
+    path ต้องยาวเกิน 20 ตัวอักษร ซึ่งลิงก์เมนูผ่านได้เกือบทั้งหมด
+    (/unodc/en/about-unodc/senior-leadership.html = 44 ตัวอักษร)
+
+    ผลที่วัดได้ก่อนแก้: จาก 100 หน้าที่ดึงมา เป็นข่าวจริงราว 5 หน้า ที่เหลือคือ
+    "ทำเนียบผู้บริหาร" "Site Map" "Employment Opportunities" และหน้าสารบัญ
+    แบบฟอร์มขอใบอนุญาต ซึ่งมีคำสำคัญอยู่เต็มแต่ไม่ใช่ข่าว
+    """
+    skip = set()
+    for tag in soup.find_all(_CHROME_TAGS):
+        skip.update(id(anchor) for anchor in tag.find_all("a", href=True))
+    for tag in soup.find_all(attrs={"role": True}):
+        if tag.get("role", "").strip().lower() in _CHROME_ROLES:
+            skip.update(id(anchor) for anchor in tag.find_all("a", href=True))
+    return [a for a in soup.find_all("a", href=True) if id(a) not in skip]
+
+
 def extract_links(html, base_url, link_pattern=None, search_scripts=True):
     """หาลิงก์บทความจากหน้ารวมข่าว (คู่มือหน้า 3 ขั้น 1)
 
     มี link_pattern: เลือกเฉพาะลิงก์ที่ path ตรงกับ regex นั้น
     ไม่มี: เลือกลิงก์โดเมนเดียวกันที่ path ยาวเกิน 20 ตัวอักษร
+
+    ข้ามลิงก์ในเมนู หัวเว็บ ท้ายเว็บ และแถบข้างเสมอ (ดู _anchors_outside_chrome)
+    เว้นแต่ตัดแล้วไม่เหลือลิงก์เลย ซึ่งแปลว่าเว็บนั้นวางรายการข่าวไว้ในนั้นจริง
+    กรณีนั้นถอยไปใช้ทั้งหน้า ดีกว่าได้ศูนย์บทความ
 
     search_scripts: ค้น URL ที่อยู่ใน <script>/JSON ด้วย
         บางเว็บโหลดรายการข่าวผ่าน JavaScript ลิงก์จึงไม่อยู่ใน <a href>
@@ -255,10 +290,15 @@ def extract_links(html, base_url, link_pattern=None, search_scripts=True):
         seen.add(url)
         found.append({"url": url, "title": title or None, "found_in": source})
 
-    for anchor in soup.find_all("a", href=True):
-        accept(_clean_url(base_url, anchor["href"]),
-               normalize_text(anchor.get_text(" ", strip=True)),
-               "anchor")
+    def take(anchors):
+        for anchor in anchors:
+            accept(_clean_url(base_url, anchor["href"]),
+                   normalize_text(anchor.get_text(" ", strip=True)),
+                   "anchor")
+
+    take(_anchors_outside_chrome(soup))
+    if not found:
+        take(soup.find_all("a", href=True))
 
     if search_scripts:
         for script in soup.find_all("script"):
@@ -353,11 +393,61 @@ def _jsonld_dates(soup):
     return published, modified
 
 
+#: ชื่อเดือนไทย ทั้งแบบย่อและเต็ม
+_THAI_MONTHS = {}
+for _i, (_short, _full) in enumerate([
+        ("มค", "มกราคม"), ("กพ", "กุมภาพันธ์"), ("มีค", "มีนาคม"), ("เมย", "เมษายน"),
+        ("พค", "พฤษภาคม"), ("มิย", "มิถุนายน"), ("กค", "กรกฎาคม"), ("สค", "สิงหาคม"),
+        ("กย", "กันยายน"), ("ตค", "ตุลาคม"), ("พย", "พฤศจิกายน"), ("ธค", "ธันวาคม")],
+        start=1):
+    _THAI_MONTHS[_short] = _i
+    _THAI_MONTHS[_full] = _i
+
+#: วันที่แบบไทย "2 ตุลาคม 2569" หรือ "05 ต.ค. 69"
+#: จุดกับช่องว่างใส่หรือไม่ใส่ก็ได้ เว็บ อย. เขียนทั้งสองแบบในหน้าเดียวกัน
+_THAI_DATE_RE = re.compile(
+    r"(?<!\d)(?P<d>\d{1,2})\s*"
+    r"(?P<mon>" + "|".join(
+        r"\.?\s*".join(ch for ch in name) for name in
+        sorted(_THAI_MONTHS, key=len, reverse=True)) + r")\.?\s*"
+    r"(?P<y>\d{4}|\d{2})(?!\d)")
+
+#: ปีพุทธศักราชมากกว่าคริสต์ศักราช 543 ปี
+_BE_OFFSET = 543
+
+
+def thai_date_from_text(text):
+    """อ่านวันที่พุทธศักราชตัวแรกในข้อความ คืนสตริง ISO 8601 หรือ None
+
+    เว็บ อย. ทั้งสองแห่งไม่ใส่ meta วันที่ ไม่มี <time> และไม่มีปีใน URL
+    วันที่เผยแพร่เขียนเป็นข้อความไทยใต้พาดหัวเท่านั้น เช่น "2 ตุลาคม 2569"
+    ถ้าไม่อ่านช่องนี้ ตัวกรอง --since-days จะใช้กับแหล่งไทยไม่ได้เลย
+
+    เอาวันที่ที่อยู่ต้นที่สุด เพราะเทมเพลตวางวันที่ของบทความไว้ใต้พาดหัว
+    ส่วนวันที่ของข่าวอื่นอยู่ในกล่อง "ข่าวอื่น ๆ" ท้ายหน้า
+    """
+    if not text:
+        return None
+    for match in _THAI_DATE_RE.finditer(text):
+        month = _THAI_MONTHS.get(re.sub(r"[.\s]", "", match.group("mon")))
+        if not month:
+            continue
+        year = int(match.group("y"))
+        year += 2500 if year < 100 else 0        # "69" คือ 2569
+        year -= _BE_OFFSET
+        try:
+            return datetime(year, month, int(match.group("d"))).date().isoformat()
+        except ValueError:                        # 31 กุมภาพันธ์ ฯลฯ
+            continue
+    return None
+
+
 def extract_published_at(html):
     """หาวันที่เผยแพร่ของบทความ คืนสตริง ISO 8601 หรือ None
 
     หน้ารวมข่าวมักไม่ได้บอกวันที่มาด้วย จึงต้องมาอ่านจากหน้าบทความเอง
     ไล่หาตามลำดับ meta tag -> JSON-LD -> <time datetime> -> วันที่แก้ไขล่าสุด
+    -> วันที่พุทธศักราชในเนื้อหา (แหล่งไทยไม่มีช่องใดข้างบนเลย)
     """
     soup = BeautifulSoup(html, "lxml")
     published_ld, modified_ld = _jsonld_dates(soup)
@@ -379,7 +469,8 @@ def extract_published_at(html):
         parsed = _parse_date(value)
         if parsed:
             return parsed
-    return None
+
+    return thai_date_from_text(extract_article(html))
 
 
 def parse_feed(xml_text, limit=None):
@@ -461,11 +552,30 @@ def extract_article(html):
 _MIN_TITLE_LEN = 25
 
 
+def _og_title(soup):
+    """หัวข้อจาก <meta property="og:title">
+
+    เว็บ อย. ทั้งสองแห่ง (narcotic, hpvcthai) ไม่มี <h1> เลยแม้แต่ตัวเดียว
+    และ <title> เป็นชื่อเว็บล้วน ๆ ทุกหน้า หัวข้อข่าวจริงอยู่ใน og:title
+    เท่านั้น ถ้าไม่อ่านช่องนี้ ทุกบทความจะได้ชื่อเดียวกันคือชื่อหน่วยงาน
+    ซึ่งทำให้คำสำคัญในชื่อหน่วยงาน ("กองควบคุม*วัตถุเสพติด*") ถูกนับซ้ำ
+    ทุกบทความ กลายเป็นผลบวกปลอมที่เลี่ยงไม่ได้
+    """
+    for key, value in (("property", "og:title"), ("name", "og:title"),
+                       ("name", "twitter:title")):
+        tag = soup.find("meta", attrs={key: value})
+        if tag and tag.get("content"):
+            title = normalize_text(tag["content"])
+            if title:
+                return title
+    return None
+
+
 def extract_title(html):
     """ดึงหัวข้อข่าวจากหน้าบทความ
 
     เลือก <h1> ที่ยาวที่สุด เพราะหน้าที่มีหลาย <h1> มักเอาชื่อเว็บขึ้นก่อน
-    ถ้ายังสั้นผิดปกติให้ใช้ <title> แทน
+    ถ้ายังสั้นผิดปกติให้ลอง og:title ก่อน แล้วค่อยใช้ <title>
     """
     soup = BeautifulSoup(html, "lxml")
 
@@ -475,6 +585,10 @@ def extract_title(html):
     if best and len(best) >= _MIN_TITLE_LEN:
         return best
 
+    shared = _og_title(soup)
+    if shared and len(shared) >= _MIN_TITLE_LEN:
+        return shared
+
     if soup.title:
         # <title> มักมีชื่อเว็บต่อท้ายหลังขีดคั่น ตัดออกถ้าส่วนหน้ายาวพอ
         raw = normalize_text(soup.title.get_text(strip=True))
@@ -483,7 +597,7 @@ def extract_title(html):
         if page_title:
             return page_title
 
-    return best
+    return best or shared
 
 
 #: ชื่อเดือนภาษาอังกฤษที่โผล่ใน URL ของบางเว็บ เช่น /2026/October/

@@ -16,7 +16,9 @@ from workers.crawler import (BlockedError, crawl_source, extract_article,
                              by_keyword, compile_keyword, count_keywords,
                              date_from_url, extract_links, find_next_page,
                              extract_published_at, extract_title,
-                             normalize_source, normalize_text, parse_feed)
+                             normalize_source, normalize_text, parse_feed,
+                             resolve_overlaps)
+from workers.crawler.crawler import thai_date_from_text
 
 
 class FakeResponse:
@@ -564,6 +566,198 @@ def test_rss_ไม่เดินหน้าถัดไป():
     source = {"name": "ทดสอบ", "url": "https://example.org/feed", "kind": "rss"}
     result = crawl_source(source, FakeFetcher({"https://example.org/feed": FEED}))
     assert result["pages_read"] == 1
+
+
+#: หน้าที่วางลิงก์ "บทความ" ไว้ในเมนูยาว ๆ แบบที่เว็บหน่วยงานจริงทำ
+#:
+#: ตัวกรองสำรองคือ path ต้องยาวเกิน 20 ตัวอักษร ซึ่งลิงก์เมนูของเว็บจริง
+#: ผ่านได้สบาย ("/unodc/en/about-unodc/senior-leadership.html" = 44) ทำให้
+#: หน้าอย่าง "ทำเนียบผู้บริหาร" กับ "Site Map" ถูกเก็บมาเป็นข่าว
+LISTING_WITH_CHROME = """
+<html><body>
+  <nav>
+    <a href="/en/about-us/senior-leadership-and-directors">ทำเนียบผู้บริหาร</a>
+    <a href="/en/about-us/employment-opportunities-here">หน้ารับสมัครงาน</a>
+  </nav>
+  <header><a href="/en/about-us/organisation-structure">โครงสร้างหน่วยงาน</a></header>
+  <div role="navigation"><a href="/en/about-us/the-complete-site-map">Site Map</a></div>
+  <aside><a href="/en/about-us/related-links-and-partners">เว็บลิงก์</a></aside>
+  <main>
+    <a href="/en/alert-recall/first-story">ข่าวแรก</a>
+    <a href="/en/alert-recall/second-story">ข่าวสอง</a>
+  </main>
+  <footer><a href="/en/about-us/contact-us-by-telephone">ติดต่อเรา</a></footer>
+</body></html>
+"""
+
+#: เว็บที่วางรายการข่าวไว้ในเมนูจริง ๆ ตัดแล้วจะไม่เหลืออะไรเลย
+LISTING_ONLY_CHROME = """
+<html><body>
+  <nav>
+    <a href="/en/alert-recall/first-story">ข่าวแรก</a>
+    <a href="/en/alert-recall/second-story">ข่าวสอง</a>
+  </nav>
+</body></html>
+"""
+
+
+def test_extract_links_ไม่เก็บลิงก์ในเมนูแม้_path_จะยาว():
+    links = extract_links(LISTING_WITH_CHROME, "https://example.org/en")
+    urls = [l["url"] for l in links]
+    assert any("first-story" in u for u in urls), urls
+    assert any("second-story" in u for u in urls), urls
+    # ทั้งหกลิงก์ข้างล่างมี path ยาวเกินเกณฑ์ทั้งหมด จึงหลุดมาได้ถ้าไม่ตัดเมนู
+    for menu in ("senior-leadership", "employment-opportunities", "organisation-structure",
+                 "site-map", "related-links", "contact-us"):
+        assert not any(menu in u for u in urls), f"{menu} ไม่ควรถูกเก็บ: {urls}"
+
+
+def test_extract_links_ถอยไปใช้ทั้งหน้าเมื่อตัดเมนูแล้วไม่เหลือลิงก์():
+    # ได้ลิงก์เมนูยังดีกว่าได้ศูนย์บทความ
+    links = extract_links(LISTING_ONLY_CHROME, "https://example.org/en")
+    urls = [l["url"] for l in links]
+    assert any("first-story" in u for u in urls), urls
+    assert any("second-story" in u for u in urls), urls
+
+
+def test_extract_links_ตัดเมนูแล้วยังใช้_pattern_ได้ตามเดิม():
+    links = extract_links(LISTING_WITH_CHROME, "https://example.org/en",
+                          r"/en/alert-recall/")
+    assert [l["url"] for l in links] == [
+        "https://example.org/en/alert-recall/first-story",
+        "https://example.org/en/alert-recall/second-story"]
+
+
+# ---------- การนับซ้อน ----------
+
+def test_นับคำที่ซ้อนกันเข้าคำที่ยาวที่สุดคำเดียว():
+    # "ยาเสพติดให้โทษ" มี "ยาเสพติด" และ "เสพติด" ซ่อนอยู่ข้างใน
+    # ข้อความหนึ่งครั้งต้องไม่กลายเป็นสามครั้ง
+    articles = [{"title": "", "summary": "", "text": "ครอบครองยาเสพติดให้โทษประเภท 2"}]
+    totals = count_keywords(articles, ["ยาเสพติดให้โทษ", "ยาเสพติด", "เสพติด"])
+    assert totals == {"ยาเสพติดให้โทษ": 1, "ยาเสพติด": 0, "เสพติด": 0}, totals
+
+
+def test_คำที่เหลื่อมกันบางส่วนนับทั้งสองคำ():
+    # คนละข้อความ แค่ตำแหน่งคาบเกี่ยว ต้องไม่ถูกตัดทิ้งไปด้วย
+    kept = resolve_overlaps([(0, 5, "ก"), (3, 20, "ข")])
+    assert [name for _, _, name in kept] == ["ก", "ข"], kept
+
+
+def test_count_keywords_ปิดการตัดซ้อนได้เมื่อต้องการยอดดิบ():
+    articles = [{"title": "", "summary": "", "text": "ยาเสพติดให้โทษ"}]
+    totals = count_keywords(articles, ["ยาเสพติดให้โทษ", "เสพติด"], resolve=False)
+    assert totals == {"ยาเสพติดให้โทษ": 1, "เสพติด": 1}, totals
+
+
+# ---------- ขอบเขตคำ ----------
+
+def test_วลีอังกฤษที่คั่นด้วยยัติภังค์ยังหาเจอ():
+    assert _count("Drug Recall", "A drug-recall notice was issued.") == 1
+    assert _count("Drug Recall", "A drug recall notice was issued.") == 1
+
+
+def test_คำอังกฤษที่ติดกับอักษรไทยยังหาเจอ():
+    # ข่าวไทยเขียนชื่อสารติดกับคำไทยเป็นปกติ ไม่เว้นวรรคให้
+    assert _count("NDMA", "ตรวจพบสารNDMAในยา") == 1
+
+
+def test_ตัวย่อไม่ไปเกาะท้ายชื่อยาที่มียัติภังค์():
+    # "donanemab-azbt" คือหางชื่อยา ไม่ใช่การพูดถึงสารเจือปน AZBT
+    assert _count("AZBT", "Kisunla donanemab-azbt approved") == 0
+    # แต่ขึ้นต้นคำประสมได้ เพราะเป็นข่าวจริง
+    assert _count("NDMA", "NDMA-contaminated ranitidine recalled") == 1
+    assert _count("NDMA", "impurity (NDMA) found") == 1
+
+
+
+# ---------- หน้าที่ไม่มี <h1> และไม่มี meta วันที่ (เว็บ อย.) ----------
+
+#: เว็บ อย. ทั้งสองแห่งเป็นแบบนี้: ไม่มี <h1> เลย <title> เป็นชื่อเว็บล้วน
+#: หัวข้อข่าวอยู่ใน og:title และวันที่เขียนเป็นข้อความพุทธศักราชในเนื้อหา
+THAI_ARTICLE = """
+<html><head>
+  <title>กองควบคุมวัตถุเสพติด</title>
+  <meta property="og:title" content="อย. นำทีมเผาทำลายยาเสพติดของกลาง ครั้งที่ 62 รวม 17 ตัน">
+</head><body>
+  <main>
+    <h2>ภาพกิจกรรม</h2>
+    <p>อย. นำทีมเผาทำลายยาเสพติดของกลาง ครั้งที่ 62 รวม 17 ตัน 2 ตุลาคม 2569</p>
+  </main>
+</body></html>
+"""
+
+
+def test_ใช้_og_title_เมื่อหน้าไม่มี_h1_และ_title_เป็นชื่อเว็บ():
+    # ถ้าไม่อ่าน og:title ทุกบทความจะชื่อ "กองควบคุมวัตถุเสพติด" เหมือนกันหมด
+    # แล้วคำว่า "วัตถุเสพติด" ในชื่อหน่วยงานจะถูกนับเป็นผลบวกปลอมทุกบทความ
+    title = extract_title(THAI_ARTICLE)
+    assert title == "อย. นำทีมเผาทำลายยาเสพติดของกลาง ครั้งที่ 62 รวม 17 ตัน", title
+
+
+def test_อ่านวันที่พุทธศักราชจากเนื้อหาเมื่อไม่มี_meta():
+    assert extract_published_at(THAI_ARTICLE) == "2026-10-02"
+
+
+def test_วันที่พุทธศักราชรับทั้งแบบย่อและเต็ม():
+    assert thai_date_from_text("2 ตุลาคม 2569") == "2026-10-02"
+    assert thai_date_from_text("05 ต.ค. 69") == "2026-10-05"
+    assert thai_date_from_text("20มค 68") == "2025-01-20"
+
+
+def test_วันที่พุทธศักราชเอาตัวที่อยู่ต้นที่สุด():
+    # วันที่ของบทความอยู่ใต้พาดหัว ส่วนท้ายหน้าเป็นวันที่ของข่าวอื่น
+    assert thai_date_from_text("ประจำวันที่ 9 ตุลาคม 2569 ข่าวอื่น 05 ต.ค. 69") == "2026-10-09"
+
+
+def test_วันที่พุทธศักราชข้ามวันที่ที่ไม่มีจริง():
+    assert thai_date_from_text("31 กุมภาพันธ์ 2569 แต่ 1 มีนาคม 2569") == "2026-03-01"
+
+
+def test_ไม่มีวันที่ไทยคืน_none():
+    assert thai_date_from_text("ไม่มีวันที่เลย") is None
+    assert thai_date_from_text("") is None
+
+
+
+def test_คำไทยสั้นใส่_exclude_กันไปโผล่กลางคำอื่น():
+    # "ไอซ์" คือชื่อเรียกเมทแอมเฟตามีน แต่เป็นต้นคำของ "ไอซ์แลนด์" ด้วย
+    # เจอจริงในข่าว FTA เวียดนาม-EFTA ที่พูดถึงประเทศไอซ์แลนด์
+    icy = {"keyword": "ไอซ์", "exclude": ["ไอซ์แลนด์"]}
+    assert _count(icy, "นอร์เวย์ สวิตเซอร์แลนด์ ไอซ์แลนด์ และลิกเตนสไตน์") == 0
+    assert _count(icy, "จับกุมยาไอซ์ 50 กิโลกรัม") == 1
+
+
+def test_exclude_กันได้ทั้งหน้าและหลังคำ():
+    assert _count({"keyword": "ยาอี", "exclude": ["ยาอีก"]}, "ต้องกินยาอีกครั้ง") == 0
+    assert _count({"keyword": "ไอซ์", "exclude": ["สารไอซ์"]}, "พบสารไอซ์") == 0
+    assert _count({"keyword": "ไอซ์", "exclude": ["สารไอซ์"]}, "พบยาไอซ์") == 1
+
+
+def test_ไม่ใส่_exclude_พฤติกรรมเหมือนเดิม():
+    assert _count("ไอซ์", "ไอซ์แลนด์") == 1
+
+
+
+def test_ไม่นับพาดหัวซ้ำเมื่อเนื้อหามีพาดหัวอยู่แล้ว():
+    # เว็บส่วนใหญ่พิมพ์พาดหัวไว้ต้นเนื้อหาด้วย ถ้าต่อ title เข้าไปอีก
+    # คำในพาดหัวจะถูกนับสองรอบ
+    articles = [{"title": "เผาทำลายยาเสพติด",
+                 "summary": None,
+                 "text": "เผาทำลายยาเสพติด ครั้งที่ 62 รวม 17 ตัน"}]
+    assert count_keywords(articles, ["ยาเสพติด"]) == {"ยาเสพติด": 1}
+
+
+def test_ยังนับพาดหัวเมื่อเนื้อหาไม่มีพาดหัว():
+    articles = [{"title": "เผาทำลายยาเสพติด", "summary": None,
+                 "text": "รวม 17 ตัน"}]
+    assert count_keywords(articles, ["ยาเสพติด"]) == {"ยาเสพติด": 1}
+
+
+def test_แหล่งที่ไม่ดึงเนื้อเต็มยังนับจากพาดหัวได้():
+    articles = [{"title": "Voluntary Recall of Tablets", "summary": None, "text": None}]
+    assert count_keywords(articles, ["Voluntary Recall"]) == {"Voluntary Recall": 1}
+
 
 if __name__ == "__main__":
     passed = failed = 0

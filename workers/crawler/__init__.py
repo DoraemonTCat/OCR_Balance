@@ -23,7 +23,8 @@ from .crawler import (BlockedError, Fetcher, crawl_source, date_from_url,
                       extract_links, extract_published_at, extract_title,
                       find_next_page, parse_feed)
 from .aggregate import by_keyword
-from .matcher import compile_keyword, count_in, count_keywords
+from .matcher import (compile_keyword, count_in, count_keywords, find_spans,
+                      resolve_overlaps)
 from .normalize import normalize_text, normalize_thai
 from .runner import (OPTIONAL_FIELDS, REQUIRED_FIELDS, Canceller,
                      load_keywords, load_sources, normalize_source, run)
@@ -36,6 +37,7 @@ __all__ = [
     "compile_keyword",
     "count_in",
     "count_keywords",
+    "find_spans",
     "crawl_source",
     "date_from_url",
     "extract_article",
@@ -51,5 +53,6 @@ __all__ = [
     "normalize_text",
     "normalize_thai",
     "parse_feed",
+    "resolve_overlaps",
     "run",
 ]

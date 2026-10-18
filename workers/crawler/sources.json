@@ -310,6 +310,28 @@
       "kind": "html",
       "url": "https://apps.tga.gov.au/PROD/DRAC/arn-entry.aspx",
       "note": "HTTP 200 แต่มีแท็ก a แค่ 2 ตัวและไม่มีลิงก์บทความเลย = เป็นหน้าฟอร์มค้นหา ASP.NET ต้องส่ง POST พร้อม ViewState ถึงจะได้ข้อมูล ไม่ใช่หน้ารวมข่าว"
+    },
+    {
+      "name": "กองควบคุมวัตถุเสพติด อย.",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "html",
+      "url": "https://narcotic.fda.moph.go.th/activity-pictures/",
+      "original_url": "https://narcotic.fda.moph.go.th/",
+      "link_pattern": "/activity-pictures/[^/]+/?$",
+      "extract_full_text": true,
+      "note": "เว็บในเอกสาร keyword.docx หน้าแรกเป็น splash ต้องเข้า /activity-pictures/ ซึ่งเป็นส่วนข่าว ส่วนที่เหลือของเว็บเป็นแบบฟอร์มขอใบอนุญาต ไม่ใช่ข่าว เจอข่าว 12 รายการ"
+    },
+    {
+      "name": "HPVC - ศูนย์เฝ้าระวังความปลอดภัย",
+      "group": "regulator",
+      "status": "ready",
+      "kind": "html",
+      "url": "https://hpvcthai.fda.moph.go.th/home",
+      "original_url": "https://hpvcthai.fda.moph.go.th/home",
+      "link_pattern": "/(?:hpvc-news|press-release)/[^/]+/?$",
+      "extract_full_text": true,
+      "note": "เว็บในเอกสาร keyword.docx หน้า /news/category/... โหลดรายการด้วย JavaScript จึงมีแต่ลิงก์เลขหน้า ต้องใช้หน้าแรกซึ่งมีลิงก์บทความจริง เจอข่าว 7 รายการ"
     }
   ]
 }
