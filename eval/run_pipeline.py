@@ -26,7 +26,15 @@ def main() -> None:
     parser.add_argument("pdf")
     parser.add_argument("out")
     parser.add_argument("--pages", default="")
+    parser.add_argument(
+        "--ignore-text-layer", action="store_true",
+        help="read every page with OCR, as if the file carried no text",
+    )
     args = parser.parse_args()
+    if args.ignore_text_layer:
+        from workers import pdf_extractor
+
+        pdf_extractor.has_usable_text = lambda page: False
 
     pages = {int(p) for p in args.pages.split(",") if p.strip()} or None
     result = balance_pipeline.extract(Path(args.pdf), pages=pages)
@@ -47,6 +55,11 @@ def main() -> None:
                 "received": row.quantities.get(form_layout.RECEIVED),
                 "issued": row.quantities.get(form_layout.ISSUED),
                 "balance": row.quantities.get(form_layout.BALANCE),
+                "generic_name": row.cells.get(form_layout.GENERIC_NAME, ""),
+                "batch_no": row.cells.get(form_layout.BATCH_NO, ""),
+                "received_from": row.cells.get(form_layout.RECEIVED_FROM, ""),
+                "unit": row.cells.get(form_layout.UNIT, ""),
+                "remark": row.cells.get(form_layout.REMARK, ""),
                 "needs_review": row.needs_review,
                 "notes": row.review_notes,
             }

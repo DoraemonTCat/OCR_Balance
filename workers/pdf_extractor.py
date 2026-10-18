@@ -79,6 +79,10 @@ class TextLine:
     #: comes back with its glyphs at descending y, which sorts into "พิมพ์.เก่ง
     #: การดี ญด." rather than "ด.ญ.พิมพ์ เก่งการดี".
     order: int = 0
+    #: The file separates this box from the one before it: a space stored in
+    #: the text (some OCR'd PDFs put it at the start of the next span, " HCl",
+    #: with the two spans touching), or a new block or line of the file's text.
+    space_before: bool = False
 
     @property
     def x0(self) -> float:
@@ -172,14 +176,23 @@ def text_boxes(page, dpi: int) -> list[TextLine]:
     """
     scale = dpi / _PDF_UNITS_PER_INCH
     boxes: list[TextLine] = []
+    pending_space = False
     for block in page.get_text("dict").get("blocks", []):
         if block.get("type") != 0:  # 0 = text
             continue
         for line in block.get("lines", []):
+            # Others store no spaces at all and give every word a block of
+            # its own, with boxes that overlap: a new block or line of the
+            # file's text is then the only sign of a new word.
+            pending_space = pending_space or bool(boxes)
             for span in line.get("spans", []):
-                text = (span.get("text") or "").strip()
+                raw = span.get("text") or ""
+                text = raw.strip()
                 if not text:
+                    pending_space = pending_space or bool(raw)
                     continue
+                space_before = pending_space or raw[0].isspace()
+                pending_space = raw[-1].isspace()
                 x0, y0, x1, y1 = span["bbox"]
                 boxes.append(
                     TextLine(
@@ -189,6 +202,7 @@ def text_boxes(page, dpi: int) -> list[TextLine]:
                         size=span.get("size"),
                         bold=bool(span.get("flags", 0) & 16),
                         order=len(boxes),
+                        space_before=space_before,
                     )
                 )
     return boxes

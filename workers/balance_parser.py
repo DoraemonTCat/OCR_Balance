@@ -269,7 +269,11 @@ def _carry_dates_down(rows: list[LedgerRow]) -> None:
         if written or len(re.sub(r"\s", "", cell)) > _SPECK_TEXT:
             previous = row
             continue
-        if previous is None or previous.entry_date is None:
+        if previous is None:
+            continue
+        # A line under "3-31 ม.ค. 68" is part of that month's summary too.
+        above = previous.get(form_layout.DATE)
+        if previous.entry_date is None and not norm.is_date_range(above):
             continue
         row.cells[form_layout.DATE] = previous.get(form_layout.DATE)
         row.entry_date = previous.entry_date
@@ -628,7 +632,8 @@ def _join(items) -> str:
     for previous, box in zip(ordered, ordered[1:]):
         along = box.bbox[0] - previous.bbox[2]
         wrapped = box.bbox[1] >= previous.bbox[3]
-        out.append(" " if along > limit or wrapped else "")
+        spaced = getattr(box, "space_before", False)
+        out.append(" " if along > limit or wrapped or spaced else "")
         out.append(box.text)
     return "".join(out)
 
@@ -797,12 +802,63 @@ def reconcile(rows: list[LedgerRow]) -> None:
     something read off the page.
     """
     carried: int | None = None
+    running: int | None = None
     for row in rows:
+        if row.get(form_layout.GENERIC_NAME).strip():
+            # A new drug starts its own account on the same page.
+            running = None
         _carry_forward(row, carried)
         _derive_missing(row)
+        _derive_movement(row, running)
         _check_balance(row)
         balance = row.quantities.get(form_layout.BALANCE)
         carried = balance if balance is not None else None
+        running = _stock_after(row, running)
+
+
+def _stock_after(row: LedgerRow, running: int | None) -> int | None:
+    """The stock once this line is done: its คงเหลือ, or the sum it implies."""
+    quantities = row.quantities
+    if quantities.get(form_layout.BALANCE) is not None:
+        return quantities[form_layout.BALANCE]
+    start = quantities.get(form_layout.BALANCE_BROUGHT)
+    if start is None:
+        start = running if running is not None else 0
+    received = quantities.get(form_layout.RECEIVED) or 0
+    issued = quantities.get(form_layout.ISSUED) or 0
+    if not received and not issued and running is None:
+        return None
+    return start + received - issued
+
+
+def _derive_movement(row: LedgerRow, running: int | None) -> None:
+    """Fill a line's รับ or จ่าย from the stock before it and its คงเหลือ.
+
+    A line that records a balance but no movement at all cannot be right: the
+    balance changed, so something came in or went out. That is what an OCR'd
+    PDF looks like when its text layer dropped the figure - the scan shows
+    "30" under จ่าย and the file's text has nothing there.
+    """
+    quantities = row.quantities
+    balance = quantities.get(form_layout.BALANCE)
+    if running is None or balance is None or balance == running:
+        return
+    if any(
+        quantities.get(role) is not None
+        for role in (form_layout.RECEIVED, form_layout.ISSUED)
+    ):
+        return
+    if quantities.get(form_layout.BALANCE_BROUGHT) not in (None, running):
+        return
+    role = form_layout.ISSUED if balance < running else form_layout.RECEIVED
+    if role not in row.cells and role not in quantities:
+        return
+    quantities[role] = abs(running - balance)
+    row.unread.discard(role)
+    row.flag(
+        f"{role} derived from the running balance ({running} -> {balance}); "
+        f"the page shows no figure"
+    )
 
 
 #: Thin strokes are what the recogniser loses first, and the slashes of a date
