@@ -6,20 +6,22 @@ python-dotenv==1.0.1
 
 # PostgreSQL. The service only stores what it reads; point DB_* at any server.
 psycopg[binary]==3.2.3
-psycopg-pool==3.2.4
 
 # Document processing
 PyMuPDF==1.24.14
-paddleocr==2.9.1
-paddlepaddle==2.6.2
-# paddleocr imports pkg_resources at module load. Python 3.12 no longer puts
-# setuptools in a new venv, so without this "import paddleocr" fails with
-# ModuleNotFoundError: No module named 'setuptools'.
-setuptools>=70.0.0
-# Grid detection, deskew, and the OCR engine's preprocessing.
-opencv-python-headless==4.10.0.84
-numpy==1.26.4
+# PaddleOCR 3 (PP-OCRv5): the first release with a Thai recognition model
+# (th_PP-OCRv5_mobile_rec). 2.9.1 had none, and every Thai cell came back as
+# Latin noise. paddleocr pulls in paddlex, which brings its own
+# opencv-contrib-python - do not also install opencv-python(-headless), the two
+# packages fight over the same cv2 module.
+paddleocr==3.3.0
+paddlepaddle==3.2.0
+numpy==2.2.6
 Pillow==11.0.0
+# Spelling model for Thai names (workers/thai_names.py): its lists of Thai
+# given names, family names and words. Pure Python.
+pythainlp==5.4.0
+# Tesseract itself is a program, not a package: see scripts/setup_tesseract.ps1.
 
 # Excel output
 openpyxl==3.1.5

@@ -27,6 +27,7 @@ header and its entries are self-contained.
 from __future__ import annotations
 
 import datetime as dt
+import difflib
 import logging
 import re
 from collections import Counter
@@ -35,7 +36,8 @@ from dataclasses import dataclass, field, replace
 from workers import balance_normalizer as norm
 from workers import form_layout
 from workers.form_layout import FormLayout, FormNotRecognised
-from workers.grid_detector import Grid, GridNotFound, cluster_by_y, detect
+from workers.cell_ocr import is_ruled
+from workers.grid_detector import Grid, GridNotFound, cluster_by_y, detect, orient
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +90,11 @@ class PageParse:
     header_text: str
     skew_angle: float
     confidence: float | None
+    #: The form's code as printed at the top of the page ("แบบ บ.ว.จ.-คค 1"),
+    #: when it could be read; ``form.code`` otherwise.
+    form_code: str = ""
+    #: Clockwise turn applied to bring a sideways or inverted scan upright.
+    rotation: int = 0
 
 
 @dataclass(slots=True)
@@ -99,7 +106,9 @@ class _TextLayerPage:
     confidence: float | None = 1.0
 
 
-def parse_page(image, page_number: int, ocr, text_layer=None) -> PageParse:
+def parse_page(
+    image, page_number: int, ocr, text_layer=None, cell_ocr=None
+) -> PageParse:
     """Parse one rendered page.
 
     ``image`` is a BGR array of the page.
@@ -113,7 +122,16 @@ def parse_page(image, page_number: int, ocr, text_layer=None) -> PageParse:
     Without it, ``ocr`` is called with the *deskewed* image and must return an
     object whose ``lines`` carry ``text``, ``bbox`` and ``confidence`` -
     ``ocr_engine.recognize_image`` does.
+
+    ``cell_ocr``, when given, is used instead of ``ocr`` on a table ruled under
+    every entry, with the grid as well as the image -
+    ``ocr_engine.recognize_cells``.
     """
+    rotation = 0
+    if text_layer is None:
+        # A file's own text is positioned on the page as the file shows it, so
+        # only a scan - which the feeder may have taken in sideways - is turned.
+        image, rotation = orient(image)
     straight, grid = detect(image)
 
     if text_layer is not None:
@@ -123,6 +141,16 @@ def parse_page(image, page_number: int, ocr, text_layer=None) -> PageParse:
             replace(box, bbox=grid.deskew_box(box.bbox)) for box in text_layer
         ]
         page = _TextLayerPage(boxes)
+    elif cell_ocr is not None and is_ruled(grid):
+        # A table ruled under every entry is read along its rules - see
+        # workers/cell_ocr.py. A scan has no title to read the form from, so
+        # its layout is known from the rules already, and with it which column
+        # holds the buyers' names.
+        layout = form_layout.identify(grid.column_widths)
+        names = layout.index_of(form_layout.ISSUED_TO)
+        page = cell_ocr(
+            straight, grid, name_columns=(names,) if names is not None else ()
+        )
     else:
         page = ocr(straight)
 
@@ -136,16 +164,34 @@ def parse_page(image, page_number: int, ocr, text_layer=None) -> PageParse:
         for box in page.lines
         if _in_table(box, grid) and box.bbox[3] > header_bottom
     ]
-    bands = _row_bands(inside, grid, form)
+    bands = _row_bands(inside, grid, form, header_bottom)
+
+    header = [box for box in page.lines if box.bbox[3] <= grid.top]
+    form_code = _known_code(_printed_form_code(header), form) or form.code
+    trade_name = _header_value(header, _TRADE_NAME_LABEL)
 
     rows: list[LedgerRow] = []
     for index, band in enumerate(bands):
         cells, corrected = _cells(band, grid, form)
+        if trade_name and form_layout.TRADE_NAME not in form.columns:
+            # The form names its drug once, above the table, for every line.
+            cells[form_layout.TRADE_NAME] = trade_name
         row = _build_row(
-            cells, page_number, index, form, band, corrected, text_layer is not None
+            cells,
+            page_number,
+            index,
+            form,
+            band,
+            corrected,
+            text_layer is not None,
+            opening=index == 0,
         )
         if row is not None:
+            row.form_code = form_code
+            _flag_doubtful_names(row, band, grid, form)
             rows.append(row)
+
+    _carry_dates_down(rows)
 
     # The arithmetic links the lines of a page, so it is applied once the whole
     # page is read, not line by line.
@@ -167,7 +213,167 @@ def parse_page(image, page_number: int, ocr, text_layer=None) -> PageParse:
         header_text=_header_text(page.lines, grid),
         skew_angle=grid.skew_angle,
         confidence=page.confidence,
+        form_code=form_code,
+        rotation=rotation,
     )
+
+
+def _flag_doubtful_names(row: LedgerRow, band, grid: Grid, form: FormLayout) -> None:
+    """Flag a buyer's name whose readings did not agree.
+
+    Names read by several engines carry, as their confidence, the share of the
+    readings that matched the name settled on (``thai_names.read``). Below
+    ``REVIEW_AGREEMENT`` the name is at least partly a judgement between
+    readings, and a person should look at it.
+    """
+    from workers.thai_names import REVIEW_AGREEMENT
+
+    for box in band:
+        role = form.role_at(grid.column_for((box.bbox[0] + box.bbox[2]) / 2))
+        if (
+            role == form_layout.ISSUED_TO
+            and box.confidence is not None
+            and box.confidence < REVIEW_AGREEMENT
+        ):
+            row.flag(
+                "issued_to: the readings of this name disagree - "
+                "check it against the scan"
+            )
+            return
+
+
+#: The longest reading of a date cell that is taken for a speck rather than a
+#: date that could not be read. The shortest real date, "1 ม.ค.68", is longer.
+_SPECK_TEXT = 4
+
+
+def _carry_dates_down(rows: list[LedgerRow]) -> None:
+    """Give an undated line the date of the line above it.
+
+    A ledger writes the date once, on the first sale of the day, and leaves the
+    cell blank for the rest of that day's sales. The blank means "same day", so
+    each line is given that day explicitly: a row taken out of the table on its
+    own should still say when it happened.
+
+    Only a cell that is actually empty is filled. One that holds something
+    unreadable is a date that could not be read, which is a different thing
+    and stays flagged.
+    """
+    previous: LedgerRow | None = None
+    for row in rows:
+        # A cell that is not a date and is only a character or two long holds
+        # no date: it is a speck, or a mark a reviewer left in the margin, read
+        # as "ร 0=". The line is as undated as a blank one.
+        cell = row.get(form_layout.DATE)
+        written = row.entry_date is not None or norm.is_date_range(cell)
+        if written or len(re.sub(r"\s", "", cell)) > _SPECK_TEXT:
+            previous = row
+            continue
+        if previous is None or previous.entry_date is None:
+            continue
+        row.cells[form_layout.DATE] = previous.get(form_layout.DATE)
+        row.entry_date = previous.entry_date
+        row.date_certain = previous.date_certain
+        row.review_notes = [
+            note for note in row.review_notes if not note.startswith("date ")
+        ]
+        row.needs_review = bool(row.review_notes)
+
+
+#: "แบบ บ.ว.จ. ๒-ขพ" - the code is whatever follows the word แบบ on its line.
+_FORM_CODE = re.compile(r"^\s*แบบ\s*(.+?)\s*$")
+
+
+def _known_code(printed: str, form: FormLayout) -> str:
+    """The form's code as it is officially spelt, from a reading of it.
+
+    The recogniser loses the full stops of "บ.ว.จ." more often than not, so a
+    reading is matched to the codes this layout is known to be printed under,
+    ignoring punctuation and spacing. A reading close to none of them is kept
+    as read: it is still better than no code at all.
+    """
+    if not printed:
+        return ""
+    bare = lambda text: re.sub(r"[\s.]", "", text)
+    scored = [
+        (difflib.SequenceMatcher(None, bare(printed), bare(code)).ratio(), code)
+        for code in (form.code, *form.variants)
+    ]
+    best_score, best = max(scored)
+    return best if best_score >= 0.7 else printed
+
+
+def _printed_form_code(header) -> str:
+    """The form code printed in the page's top-left corner, if it was read."""
+    for box in sorted(header, key=lambda box: (box.bbox[1], box.bbox[0])):
+        match = _FORM_CODE.match(norm.clean_text(box.text))
+        if match and len(match.group(1)) <= 30:
+            return match.group(1)
+    return ""
+
+
+#: The dotted leaders a printed form gives each blank, and what is left of them
+#: once a value has been typed over part of the run.
+_LEADERS = re.compile(r"[.…·]{2,}")
+
+
+#: "ชื่อการค้า (ถ้ามี)" as the recogniser tends to return it: ช and ซ, ค and ด
+#: look nearly alike in this typeface, and so do the tone marks.
+_TRADE_NAME_LABEL = re.compile(r"[ชซ]ื[่]?อการ[คดต][้]?า")
+
+
+def _header_value(header, label) -> str:
+    """The value typed after ``label`` on its line of the header.
+
+    The header lines run "label....value....next label....value", and a
+    recogniser may return the whole line as one box or break it at the dots.
+    So the label's box and every box to its right on the same line are joined,
+    the value is what follows the label, and it ends at the next run of dots
+    that is followed by another label - in practice, at the end of the line.
+    """
+    if isinstance(label, str):
+        label = re.compile(re.escape(label))
+    anchor = next(
+        (box for box in header if label.search(form_layout.normalise(box.text))), None
+    )
+    if anchor is None:
+        return ""
+    middle = (anchor.bbox[1] + anchor.bbox[3]) / 2
+    height = anchor.bbox[3] - anchor.bbox[1]
+    line = sorted(
+        (
+            box
+            for box in header
+            if box.bbox[0] >= anchor.bbox[0] - 1
+            and abs((box.bbox[1] + box.bbox[3]) / 2 - middle) < height * 0.6
+        ),
+        key=lambda box: box.bbox[0],
+    )
+    text = " ".join(box.text for box in line).replace(*norm._SARA_AM)
+    found = label.search(re.sub(r"\s+", "", text))
+    # Position the cut in the spaced text by counting the label's letters.
+    after = text
+    if found:
+        letters = 0
+        for index, char in enumerate(text):
+            if not char.isspace():
+                letters += 1
+            if letters == found.end():
+                after = text[index + 1 :]
+                break
+    after = re.sub(r"^\s*\(?\s*ถ้ามี\s*\)?", "", after)
+    value = _LEADERS.sub(" ", after)
+    # A lone full stop left over from a leader, or a stray mark read as one.
+    value = re.sub(r"(?<!\S)[.,:;'`\-]+(?!\S)", " ", value)
+    value = re.sub(r"\s*\(\s*", " (", value)
+    value = re.sub(r"\s*\)", ")", value)
+    value = _LATIN_LOOKALIKE.sub(lambda m: "l", value)
+    return norm.clean_text(value).strip(" .")
+
+
+#: A Thai letter the recogniser put in the middle of a Latin word. The drug
+#: names are Latin; โ ใ ไ are what a tall "l" comes back as ("Convuโsil").
+_LATIN_LOOKALIKE = re.compile(r"(?<=[A-Za-z])[โใไ](?=[A-Za-z])")
 
 
 #: A drug name is a word, so the cell has to contain an unbroken run of letters
@@ -181,6 +387,14 @@ _NAME_WORD = re.compile(r"[A-Za-z]{4,}")
 
 def _looks_like_a_name(text: str) -> bool:
     return bool(_NAME_WORD.search(text or ""))
+
+
+#: A buyer's name on the sale ledgers, in Thai: at least a few letters in a row.
+_PERSON_WORD = re.compile(r"[ก-๎A-Za-z]{3,}")
+
+
+def _looks_like_a_person(text: str) -> bool:
+    return bool(_PERSON_WORD.search(text or ""))
 
 #: Quantity cells holding a figure that make a band an entry on their own, when
 #: neither the date nor the name could be read. Two, because every entry
@@ -244,7 +458,9 @@ _ANCHOR_ROLES = form_layout.NUMERIC_ROLES
 _ANCHOR_TOLERANCE = 0.8
 
 
-def _row_bands(boxes, grid: Grid, form: FormLayout) -> list[list]:
+def _row_bands(
+    boxes, grid: Grid, form: FormLayout, header_bottom: float | None = None
+) -> list[list]:
     """Split the table's boxes into one list per entry.
 
     Rows are bounded by the table's own horizontal rules where it has them, and
@@ -259,10 +475,15 @@ def _row_bands(boxes, grid: Grid, form: FormLayout) -> list[list]:
     entry below: one row loses half its name and the next gains a name it never
     had. The rule under the entry is where the row actually ends.
     """
+    # The printed titles, where they could be read, say where the header ends;
+    # the rules' own guess at it is a third of the way down the table, which on
+    # a table ruled under every entry is a dozen entries in.
+    if header_bottom is None:
+        header_bottom = grid.header_bottom
     anchors = [
         box
         for box in boxes
-        if _is_anchor(box, grid, form) and box.bbox[3] > grid.header_bottom
+        if _is_anchor(box, grid, form) and box.bbox[3] > header_bottom
     ]
     bands = cluster_by_y(
         anchors,
@@ -420,6 +641,7 @@ def _build_row(
     boxes,
     corrected: set[str] = frozenset(),
     from_text_layer: bool = False,
+    opening: bool = False,
 ) -> LedgerRow | None:
     """Validate and normalise one band, or return None if it is not a data row.
 
@@ -443,9 +665,22 @@ def _build_row(
     # as a number. Try the Thai reading first and fall back, so one parser does
     # not have to cover both conventions at once.
     entry_date, date_certain = norm.clean_thai_date(raw_date)
+    if entry_date is not None:
+        # Written the way the form writes it, from what was understood rather
+        # than from what was recognised: "17 กุมภาพันธุ์ 2567" or "1 1 ..." is
+        # a reading of "17 กุมภาพันธ์ 2567" / "11 ...", and the reading is
+        # what the date was parsed from.
+        cells[form_layout.DATE] = norm.thai_date_text(raw_date, entry_date)
     if entry_date is None and not norm.is_date_range(raw_date):
         entry_date, date_certain = norm.clean_date(raw_date)
-    has_name = _looks_like_a_name(cells.get(form_layout.GENERIC_NAME, ""))
+    if any("รวม" in form_layout.normalise(value) for value in cells.values()):
+        # The total line: "รวม" printed across the left-hand columns.
+        return None
+    has_name = (
+        _looks_like_a_name(cells.get(form_layout.GENERIC_NAME, ""))
+        or _looks_like_a_person(cells.get(form_layout.ISSUED_TO, ""))
+        or len(re.sub(r"\D", "", cells.get(form_layout.RECIPIENT_ID, ""))) >= 6
+    )
     figures = sum(
         1
         for role in form_layout.NUMERIC_ROLES
@@ -454,7 +689,13 @@ def _build_row(
     # A date column with digits in it, whether or not they parsed: a date is
     # written with digits, and the total line leaves the column empty.
     dated = any(char.isdigit() for char in raw_date)
-    if not dated and not has_name and figures < _MIN_FIGURES:
+    # The first line of a page is where the balance is brought forward, and on
+    # the sale ledgers that is all it carries: one figure, no date, no buyer.
+    # It is above every entry, so it cannot be the total line.
+    brought_forward = opening and any(
+        char.isdigit() for char in cells.get(form_layout.BALANCE_BROUGHT, "")
+    )
+    if not dated and not has_name and figures < _MIN_FIGURES and not brought_forward:
         return None
 
     row = LedgerRow(
@@ -500,7 +741,11 @@ def _build_row(
             row.flag(f"{role} could not be read as a number")
 
     row.date_certain = entry_date is not None and date_certain
-    if entry_date is None and not norm.is_date_range(raw_date):
+    if brought_forward and not raw_date.strip():
+        # The opening line of a continuation page carries the balance over
+        # and has no date to read.
+        pass
+    elif entry_date is None and not norm.is_date_range(raw_date):
         row.flag("date could not be read")
     elif not date_certain:
         row.flag("date reconstructed from an unclear cell")
@@ -519,7 +764,8 @@ def _reads_thai(from_text_layer: bool) -> bool:
 
     A page read from the file's own text is in Thai already and correct - the
     recipient's name, the unit, the remark. A page that had to be recognised is
-    only as good as the engine, and PaddleOCR 2.9.1 has no Thai model.
+    only as good as the engine: with OCR_LANGUAGE=th, PaddleOCR 3 reads Thai;
+    with "latin" (all PaddleOCR 2.9.1 offered) it cannot.
 
     Flagging by the engine's language alone marked every Thai cell of a
     searchable PDF as unreadable while printing the right answer beside it.
@@ -583,12 +829,25 @@ def settle_dates(rows: list[LedgerRow]) -> None:
     settled = [row.entry_date for row in rows if row.date_certain]
     if not settled:
         return
-    month_year = Counter((d.month, d.year) for d in settled).most_common(1)[0][0]
-    month, year = month_year
+    document_month = Counter((d.month, d.year) for d in settled).most_common(1)[0][0]
+
+    # A page that has clean dates of its own says which month it covers; one
+    # submission can bundle several months' ledgers. Only a page without a
+    # single clean date borrows the month the rest of the document agrees on.
+    page_months: dict[int, tuple[int, int]] = {}
+    for page in {row.page_number for row in rows}:
+        own = [r.entry_date for r in rows if r.page_number == page and r.date_certain]
+        page_months[page] = (
+            Counter((d.month, d.year) for d in own).most_common(1)[0][0]
+            if own
+            else document_month
+        )
 
     for row in rows:
+        month_year = page_months[row.page_number]
         date = row.entry_date
         if date is not None and (date.month, date.year) != month_year:
+            year, month = month_year[1], month_year[0]
             row.flag(
                 f"date read as {date.isoformat()}, which is not in the month "
                 f"these returns cover ({year}-{month:02d}); discarded"
@@ -597,6 +856,7 @@ def settle_dates(rows: list[LedgerRow]) -> None:
             row.date_certain = False
 
     for page in sorted({row.page_number for row in rows}):
+        month, year = page_months[page]
         previous_day = 0
         for row in [r for r in rows if r.page_number == page]:
             if row.entry_date is not None:

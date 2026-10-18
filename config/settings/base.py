@@ -158,14 +158,11 @@ CORS_ALLOW_ORIGINS = env_list(
 DOCUMENT_ROOT = Path(env("DOCUMENT_ROOT", str(BASE_DIR / "data"))).resolve()
 
 OCR = {
-    # PaddleOCR 2.9.1 ships no Thai recognition model - its languages are ch,
-    # en, korean, japan, chinese_cht, ta, te, ka, latin, arabic, cyrillic and
-    # devanagari - and asserts on anything else. "latin" is the usable default:
-    # it reads the drug names, batch numbers, dates and quantities on the
-    # psychotropic ledgers, which are written in Latin script and digits. The
-    # Thai cells on those forms come back as noise and are flagged for review
-    # rather than reported as read. See docs/OCR_THAI.md.
-    "LANGUAGE": env("OCR_LANGUAGE", "latin"),
+    # PaddleOCR 3 (PP-OCRv5) has a Thai model, and it reads Latin letters and
+    # digits as well, so "th" serves every form here. Under 2.9.1 there was
+    # none and this had to be "latin", which returned Thai cells as Latin
+    # noise; "latin" still works and flags those cells. See docs/OCR_THAI.md.
+    "LANGUAGE": env("OCR_LANGUAGE", "th"),
     "USE_GPU": env_bool("OCR_USE_GPU", False),
     # Pages are rendered at this dpi before the table rules are detected.
     # 300 rather than 200: at 200 the recogniser misses the quantity cells on
@@ -173,6 +170,20 @@ OCR = {
     # rows at all - on the sample it cost 4 of the 45 entries, 3 of them from
     # one page. The cost is roughly half again as long per page.
     "RENDER_DPI": env_int("OCR_RENDER_DPI", 300),
+    # Detection thresholds - see ocr_engine.get_engine.
+    "DET_THRESH": env_float("OCR_DET_THRESH", 0.2),
+    "DET_BOX_THRESH": env_float("OCR_DET_BOX_THRESH", 0.3),
+    # The recogniser used on its own for ruled tables read cell by cell
+    # (workers/cell_ocr.py). Reads Thai, Latin and digits.
+    "REC_MODEL": env("OCR_REC_MODEL", "th_PP-OCRv5_mobile_rec"),
+    "REC_BATCH": env_int("OCR_REC_BATCH", 16),
+    # Tesseract, the second reader of the buyers' names (workers/thai_names.py).
+    # Optional: without it the names are read by PaddleOCR alone, less well.
+    # The traineddata files are fetched by scripts/setup_tesseract.ps1.
+    "TESSERACT_CMD": env("TESSERACT_CMD", ""),
+    "TESSDATA_DIR": Path(env("TESSDATA_DIR", str(BASE_DIR / "tessdata"))).resolve(),
+    "TESSERACT_LANG": env("TESSERACT_LANG", "tha"),
+    "TESSERACT_FAST_LANG": env("TESSERACT_FAST_LANG", "tha_fast"),
 }
 
 BULK_INSERT_BATCH_SIZE = env_int("BULK_INSERT_BATCH_SIZE", 1000)

@@ -13,6 +13,7 @@ presented as fact.
 from __future__ import annotations
 
 import datetime as dt
+import difflib
 import re
 
 #: Glyphs the Latin recogniser returns for handwritten digits.
@@ -262,10 +263,8 @@ def clean_thai_date(text: str) -> tuple[dt.date | None, bool]:
     if is_date_range(raw):
         return None, True
 
-    compact = re.sub(r"[\s.]", "", raw)
-    month = next(
-        (number for name, number in _THAI_MONTHS.items() if name in compact), None
-    )
+    compact = re.sub(r"[\s.]", "", raw).replace(*_SARA_AM)
+    month, exact = _thai_month(compact)
     if month is None:
         return None, False
 
@@ -275,4 +274,59 @@ def clean_thai_date(text: str) -> tuple[dt.date | None, bool]:
 
     # Day first, year last: these forms write them in that order, and the month
     # between them has already been taken out of the running.
-    return _build_date(numbers[0], str(month), numbers[-1]), True
+    return _build_date(numbers[0], str(month), numbers[-1]), exact
+
+
+#: The months written out in full, as the pharmacy ledgers type them
+#: ("15 มกราคม 2567").
+_THAI_MONTH_NAMES: dict[str, int] = {
+    "มกราคม": 1, "กุมภาพันธ์": 2, "มีนาคม": 3, "เมษายน": 4, "พฤษภาคม": 5,
+    "มิถุนายน": 6, "กรกฎาคม": 7, "สิงหาคม": 8, "กันยายน": 9, "ตุลาคม": 10,
+    "พฤศจิกายน": 11, "ธันวาคม": 12,
+}
+
+#: How close a misread full month name has to be to one of the twelve. The
+#: recogniser drops or swaps a vowel mark now and then ("กุมภาพันธ" for
+#: "กุมภาพันธ์"); the nearest two different months are far further apart.
+_MONTH_SIMILARITY = 0.75
+
+
+def thai_date_text(raw: str, value: dt.date) -> str:
+    """``value`` written as ``raw`` wrote it: full month name or abbreviation,
+    and the Buddhist-era year with as many digits as the form gave."""
+    numbers = re.findall(r"\d+", re.sub(r"\s", "", raw or ""))
+    year_digits = numbers[-1] if numbers else ""
+    year = value.year + 543
+    shown = str(year) if len(year_digits) != 2 else f"{year % 100:02d}"
+    letters = re.sub(r"[^ก-๎]", "", (raw or "").replace(*_SARA_AM))
+    if len(letters) >= 4:  # a month written out, not an abbreviation
+        month = next(n for n, m in _THAI_MONTH_NAMES.items() if m == value.month)
+        return f"{value.day} {month} {shown}"
+    return clean_text(raw)
+
+
+def _thai_month(compact: str) -> tuple[int | None, bool]:
+    """The month named in ``compact``, and whether it was spelt exactly."""
+    letters = re.sub(r"[^฀-๿]", "", compact)
+    for name, number in _THAI_MONTH_NAMES.items():
+        if name in letters:
+            return number, True
+    for name, number in _THAI_MONTHS.items():
+        if name in compact:
+            return number, True
+    if len(letters) >= 4:
+        scored = max(
+            (difflib.SequenceMatcher(None, letters, name).ratio(), number)
+            for name, number in _THAI_MONTH_NAMES.items()
+        )
+        if scored[0] >= _MONTH_SIMILARITY:
+            # One mark out of place ("กุมภาพันธุ์") still names one month
+            # beyond doubt; only a looser match is reported as a guess.
+            return scored[1], scored[0] >= _MONTH_CERTAIN
+    return None, False
+
+
+#: A misread month this close to a real one is taken as read, not guessed.
+#: "กุมภาพันธุ์" against "กุมภาพันธ์" scores 0.95; the closest two different
+#: months ("มกราคม", "มีนาคม") 0.67.
+_MONTH_CERTAIN = 0.85

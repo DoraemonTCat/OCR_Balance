@@ -159,9 +159,19 @@ class ParsePageTests(SimpleTestCase):
         self.assertTrue(any("does not add up" in note for note in row.review_notes))
 
     def test_thai_columns_are_flagged_by_column(self):
-        row = _parse(ENTRY_LINES).rows[0]
+        # Only an engine without a Thai model flags them; see the next test.
+        with self.settings(OCR={"LANGUAGE": "latin"}):
+            row = _parse(ENTRY_LINES).rows[0]
         self.assertTrue(row.needs_review)
         self.assertTrue(
+            any("written in Thai" in note for note in row.review_notes),
+            row.review_notes,
+        )
+
+    def test_thai_columns_are_not_flagged_when_the_engine_reads_thai(self):
+        with self.settings(OCR={"LANGUAGE": "th"}):
+            row = _parse(ENTRY_LINES).rows[0]
+        self.assertFalse(
             any("written in Thai" in note for note in row.review_notes),
             row.review_notes,
         )

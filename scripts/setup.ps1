@@ -2,7 +2,9 @@
 .SYNOPSIS
     Create the local virtual environment and install dependencies.
 .DESCRIPTION
-    Python 3.10 - 3.12 only: paddlepaddle 2.6.2 publishes no wheel for 3.13.
+    Python 3.10 - 3.12 (tested on 3.10 with paddlepaddle 3.2.0).
+    Tesseract, the optional second reader of Thai names, is installed
+    separately: .\scripts\setup_tesseract.ps1
 .EXAMPLE
     .\scripts\setup.ps1
     .\scripts\setup.ps1 -Dev

@@ -27,8 +27,8 @@ from workers.pdf_extractor import PdfError
 
 log = logging.getLogger(__name__)
 
-#: Beyond this, the caller should be using the worker queue rather than holding
-#: an HTTP request open. A page costs a few seconds of OCR.
+#: Beyond this the request is refused: a page costs ten to twenty seconds of
+#: OCR, and this service has no background worker to hand a long document to.
 MAX_PAGES = 50
 
 #: Where submitted files land, under DOCUMENT_ROOT.

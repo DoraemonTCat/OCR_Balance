@@ -240,6 +240,73 @@ def _rule_angles(image) -> list[float]:
     return angles
 
 
+# --- orientation -----------------------------------------------------------
+
+#: Every form here is a landscape table whose ruled lines run mostly across the
+#: page. A page fed through the scanner the other way round arrives standing on
+#: its side: taller than wide, with those same rules now running up and down.
+#: Both have to be true before the page is turned - a handwritten form leaves its
+#: data area unruled, so its vertical rules can outweigh its horizontal ones
+#: while the page is perfectly upright.
+_SIDEWAYS_RULE_RATIO = 1.5
+
+#: A page is upside down when the ink outside its table is overwhelmingly below
+#: it. The title, the licence and the drug name are printed above the table;
+#: what follows it is at most a signature. Kept well clear of 1 so that a form
+#: with footnotes under its table is never turned over.
+_INVERTED_TEXT_RATIO = 3.0
+
+
+def orient(image) -> tuple["np.ndarray", int]:
+    """Turn a page that was scanned sideways or upside down the right way up.
+
+    Returns the upright image and the clockwise rotation applied to it, a
+    multiple of 90. The deskew that follows only corrects a few degrees, so a
+    page the scanner took in at 90 or 180 degrees has to be turned first: on its
+    side, every row rule of the table reads as a column and the page matches no
+    form.
+    """
+    _require_cv2()
+    rotation = 0
+    height, width = image.shape[:2]
+    if height > width:
+        binary = _binarize(_to_gray(image))
+        across = _rules(binary, axis="h", length=max(width // 15, 20))
+        down = _rules(binary, axis="v", length=max(height // 15, 20))
+        if down.sum() > across.sum() * _SIDEWAYS_RULE_RATIO:
+            image = np.ascontiguousarray(np.rot90(image, 1))  # counter-clockwise
+            rotation = 270
+
+    if _upside_down(image):
+        image = np.ascontiguousarray(np.rot90(image, 2))
+        rotation = (rotation + 180) % 360
+
+    if rotation:
+        log.debug("page turned upright", extra={"step": "orient", "rotation": rotation})
+    return image, rotation
+
+
+def _upside_down(image) -> bool:
+    """True when the page's printed text sits under its table instead of over it."""
+    binary = _binarize(_to_gray(image))
+    height, width = binary.shape[:2]
+    # The table's extent is where its column rules run. Its row rules would
+    # say the same, but a faint one at the foot of a scan drops below any
+    # coverage threshold and puts half the table "below" it.
+    down = _rules(binary, axis="v", length=max(height // 15, 20))
+    margin_x = int(width * _BORDER_MARGIN)
+    spans = np.nonzero(down[:, margin_x : width - margin_x].any(axis=1))[0]
+    if len(spans) == 0:
+        return False
+    top, bottom = int(spans[0]), int(spans[-1])
+
+    margin_y = int(height * _BORDER_MARGIN)
+    ink = binary[:, margin_x : width - margin_x]
+    above = float(ink[margin_y : max(top - 5, margin_y)].sum())
+    below = float(ink[min(bottom + 5, height - margin_y) : height - margin_y].sum())
+    return below > max(above, 1.0) * _INVERTED_TEXT_RATIO
+
+
 # --- grid ------------------------------------------------------------------
 
 

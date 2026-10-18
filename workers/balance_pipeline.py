@@ -80,8 +80,10 @@ class DocumentResult:
         return sum(1 for row in self.rows if row.needs_review)
 
 
-def extract(path: Path, *, dpi: int | None = None) -> DocumentResult:
-    """Read every page of ``path`` and return the rows found."""
+def extract(
+    path: Path, *, dpi: int | None = None, pages: set[int] | None = None
+) -> DocumentResult:
+    """Read every page of ``path`` - or only ``pages``, 1-based - and return the rows found."""
     if fitz is None or cv2 is None:  # pragma: no cover - deployment issue
         raise PdfError("PyMuPDF and OpenCV are required to read a document")
 
@@ -94,6 +96,8 @@ def extract(path: Path, *, dpi: int | None = None) -> DocumentResult:
     try:
         for index in range(document.page_count):
             page_number = index + 1
+            if pages is not None and page_number not in pages:
+                continue
             outcome = PageOutcome(page_number=page_number)
             try:
                 pdf_page = document.load_page(index)
@@ -111,6 +115,7 @@ def extract(path: Path, *, dpi: int | None = None) -> DocumentResult:
                     page_number,
                     ocr_engine.recognize_image,
                     text_layer=text_layer,
+                    cell_ocr=ocr_engine.recognize_cells,
                 )
                 outcome.source = "TEXT_LAYER" if text_layer else "OCR"
                 result.rows.extend(parse.rows)
@@ -152,7 +157,7 @@ def extract(path: Path, *, dpi: int | None = None) -> DocumentResult:
 
 
 def _fill(outcome: PageOutcome, parse: PageParse) -> None:
-    outcome.form_code = parse.form.code
+    outcome.form_code = parse.form_code or parse.form.code
     outcome.rows = len(parse.rows)
     outcome.skew_angle = parse.skew_angle
     outcome.confidence = parse.confidence

@@ -25,3 +25,19 @@ data/crawl/*
 
 staticfiles/
 *.log
+
+# Tesseract models, fetched by scripts/setup_tesseract.ps1.
+tessdata/
+
+# OCR evaluation scratch: rendered pages, crops and run outputs.
+eval/tmp/
+eval/out/
+
+# Real documents and everything derived from them carry people's names and ID
+# numbers: the sample PDF, the answer key and the evaluation results stay local.
+eval/sample.pdf
+eval/key/
+eval/results/
+
+# Second sample, same personal data.
+eval2/

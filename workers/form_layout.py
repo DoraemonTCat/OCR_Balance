@@ -1,6 +1,6 @@
 """The three psychotropic report forms and how their columns are identified.
 
-Form identification cannot use the printed titles. PaddleOCR 2.9.1 ships no Thai
+Form identification cannot rely on the printed titles. PaddleOCR 2.9.1 shipped no Thai
 recognition model (its languages are ch / en / korean / japan / chinese_cht /
 ta / te / ka / latin / arabic / cyrillic / devanagari), so the Thai column
 headings come back as noise - "หมายเหตุ" reads as "n&nan". What survives is the
@@ -51,6 +51,8 @@ BALANCE = "balance"                #: คงเหลือ
 UNIT = "unit"                      #: หน่วย
 PRESCRIPTION_NO = "prescription_no"  #: เลขที่ใบสั่งยา
 REMARK = "remark"                  #: หมายเหตุ
+AGE = "age"                        #: อายุ (ปี)
+SIGNER = "signer"                  #: ผู้รับอนุญาต/ผู้ดำเนินกิจการ
 
 #: Roles whose cell holds a quantity, so OCR noise can be held to digits.
 NUMERIC_ROLES = frozenset({BALANCE_BROUGHT, RECEIVED, ISSUED, BALANCE})
@@ -65,10 +67,10 @@ NUMERIC_ROLES = frozenset({BALANCE_BROUGHT, RECEIVED, ISSUED, BALANCE})
 #:
 #: ``MANUFACTURER`` and ``RECEIVED_FROM`` are not here: the manufacturer is
 #: written in Latin on these ledgers ("Asian Pharm").
-THAI_ROLES = frozenset({ISSUED_TO, UNIT, REMARK})
+THAI_ROLES = frozenset({ISSUED_TO, UNIT, REMARK, SIGNER})
 
-#: PaddleOCR languages that can read Thai. Empty for 2.9.1, which ships none;
-#: the flagging above switches off by itself if a Thai model is ever configured.
+#: PaddleOCR languages that can read Thai: PaddleOCR 3's "th". Under any other
+#: language the flagging above applies.
 THAI_CAPABLE_LANGUAGES = frozenset({"th"})
 
 
@@ -87,6 +89,8 @@ class FormLayout:
     #: stretched the table. Empty for the handwritten forms, whose titles no
     #: engine here can read.
     markers: tuple[str, ...] = ()
+    #: Other codes the same layout is printed under.
+    variants: tuple[str, ...] = ()
 
     def role_at(self, index: int | None) -> str | None:
         if index is None or not 0 <= index < len(self.columns):
@@ -212,7 +216,39 @@ RYS_2 = FormLayout(
     markers=("การดำเนินกิจการจำหน่ายยาเสพติด",),
 )
 
-FORMS: tuple[FormLayout, ...] = (RVJ_7_4, BVJ_7_4_KP, RK_4, BYS_2, RYS_2)
+# --- บัญชีรับ-จ่าย / บัญชีขาย ของร้านขายยา ----------------------------------
+#
+# The pharmacy's own monthly ledger of one drug: who it was sold to, their ID
+# number and the movement. The drug is named once, in the header above the
+# table ("ชื่อการค้า (ถ้ามี) ... Zolpidem (10 mg/tab)"), not on every line, so
+# it is read from there and given to each row. Typed and scanned - the sample
+# file carries no text of its own - and fed in sideways, which
+# ``grid_detector.orient`` undoes before anything here is measured.
+#
+# The same ruled table is printed under several codes (บ.ว.จ. ๒-ขพ for
+# ประเภท ๒, บ.ว.จ. ๓-๔ for ประเภท ๓/๔), with column proportions identical to
+# within 0.002, so the geometry identifies the layout and the code printed at
+# the top-left of the page names the form.
+
+BVJ_SALE = FormLayout(
+    code="บ.ว.จ. ๒-ขพ",
+    title="บัญชีรับ-จ่าย/บัญชีขายวัตถุออกฤทธิ์",
+    columns=(
+        DATE,
+        ISSUED_TO,
+        RECIPIENT_ID,
+        AGE,
+        BALANCE_BROUGHT,
+        RECEIVED,
+        ISSUED,
+        BALANCE,
+        SIGNER,
+    ),
+    signature=(0.113, 0.145, 0.142, 0.074, 0.076, 0.072, 0.099, 0.105, 0.174),
+    variants=("บ.ว.จ.-คค 1",),
+)
+
+FORMS: tuple[FormLayout, ...] = (RVJ_7_4, BVJ_7_4_KP, RK_4, BYS_2, RYS_2, BVJ_SALE)
 
 #: Mean absolute difference per column, above which the page is not one of
 #: these forms. The same form reproduces to under 0.002; the closest pair of

@@ -1,11 +1,16 @@
-"""Settings for running the suite without a SQL Server instance.
+"""Settings for the test suite: an in-memory database and a throwaway
+document folder.
 
-Used by ``scripts\\test.ps1 -Sqlite`` and by CI stages that only need the
-pure-logic tests. The queue-claim tests skip themselves here, because claiming
-uses SQL Server table hints (see apps/transactions/queue.py); run the full
-suite against SQL Server before releasing.
+pytest.ini selects these. Uploads made by the API tests land in a temporary
+folder, not in data/input, which otherwise collected a copy of every test PDF
+on every run.
 """
+import tempfile
+from pathlib import Path
+
 from .base import *  # noqa: F401,F403
+
+DOCUMENT_ROOT = Path(tempfile.mkdtemp(prefix="ocr-balance-test-"))
 
 DEBUG = True
 ALLOWED_HOSTS = ["*"]
