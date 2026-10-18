@@ -330,3 +330,27 @@ def _thai_month(compact: str) -> tuple[int | None, bool]:
 #: "กุมภาพันธุ์" against "กุมภาพันธ์" scores 0.95; the closest two different
 #: months ("มกราคม", "มีนาคม") 0.67.
 _MONTH_CERTAIN = 0.85
+
+
+# --- Thai ID numbers -------------------------------------------------------
+
+
+def thai_id_text(text: str) -> str:
+    """A 13-digit Thai ID written the way the card prints it: 1 2345 67890 12 3.
+
+    The recogniser reads the digits of an ID well but splits it wherever the
+    glyphs of a "1" leave a gap - "3 3301 01 1 15 41 7" - so a cell holding the
+    thirteen digits in groups is regrouped. Written as one run ("3440600130976",
+    as the handwritten forms do) or with anything more in it ("เลขที่ ปชช
+    1112223334440", a passport number), it is left as written.
+    """
+    # A mark standing on its own ("|", ".") is the edge of a rule, not text.
+    cleaned = clean_text(_LONE_MARK.sub(" ", text or ""))
+    digits = re.sub(r"\s", "", cleaned)
+    if len(digits) != 13 or not digits.isdigit() or digits == cleaned:
+        return cleaned
+    return f"{digits[0]} {digits[1:5]} {digits[5:10]} {digits[10:12]} {digits[12]}"
+
+
+#: A run of punctuation with whitespace (or the cell's edge) on both sides.
+_LONE_MARK = re.compile(r"(?<!\S)[|.,:;'`_\-]+(?!\S)")

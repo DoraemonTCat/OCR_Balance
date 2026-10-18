@@ -269,3 +269,33 @@ class CellSplittingTests(SimpleTestCase):
         x0, _, x1, _ = result.lines[0].bbox
         self.assertGreater(x0, X_RULES[1])
         self.assertLess(x1, X_RULES[2])
+
+
+class IdAndStrengthFormatTests(SimpleTestCase):
+    def test_a_split_id_is_regrouped_the_way_the_card_prints_it(self):
+        self.assertEqual(norm.thai_id_text("3 3301 01 1 15 41 7"), "3 3301 01115 41 7")
+        self.assertEqual(norm.thai_id_text("3 3301 01087 14 6"), "3 3301 01087 14 6")
+
+    def test_an_id_written_as_one_run_stays_one_run(self):
+        self.assertEqual(norm.thai_id_text("3440600130976"), "3440600130976")
+
+    def test_an_id_with_words_or_wrong_length_is_left_alone(self):
+        self.assertEqual(
+            norm.thai_id_text("เลขที่ ปชช 1112223334440"), "เลขที่ ปชช 1112223334440"
+        )
+        self.assertEqual(norm.thai_id_text("12345 678"), "12345 678")
+
+    def test_strength_gets_its_space_back(self):
+        header = [
+            _Line("ชื่อการค้า (ถ้ามี)", 816, 272, 957, 300),
+            _Line("Clonaril ......(2mg/tab)", 981, 275, 1274, 300),
+        ]
+        self.assertEqual(
+            balance_parser._header_value(header, balance_parser._TRADE_NAME_LABEL),
+            "Clonaril (2 mg/tab)",
+        )
+
+    def test_rule_edges_read_as_marks_are_dropped(self):
+        self.assertEqual(norm.thai_id_text("1 3399 00259 35 7 ."), "1 3399 00259 35 7")
+        self.assertEqual(norm.thai_id_text("1 3399 00190 57 8 |"), "1 3399 00190 57 8")
+        self.assertEqual(norm.thai_id_text("|"), "")

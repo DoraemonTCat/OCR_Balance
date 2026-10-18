@@ -372,12 +372,18 @@ def _header_value(header, label) -> str:
     value = re.sub(r"\s*\(\s*", " (", value)
     value = re.sub(r"\s*\)", ")", value)
     value = _LATIN_LOOKALIKE.sub(lambda m: "l", value)
+    # "2mg/tab": the space a strength is printed with is the one the
+    # recogniser drops most, and the forms always have it.
+    value = _STRENGTH.sub(r"\1 \2", value)
     return norm.clean_text(value).strip(" .")
 
 
 #: A Thai letter the recogniser put in the middle of a Latin word. The drug
 #: names are Latin; โ ใ ไ are what a tall "l" comes back as ("Convuโsil").
 _LATIN_LOOKALIKE = re.compile(r"(?<=[A-Za-z])[โใไ](?=[A-Za-z])")
+
+#: A strength with its unit run into the number.
+_STRENGTH = re.compile(r"(\d)(mg|mcg|g|ml)\b", re.IGNORECASE)
 
 
 #: A drug name is a word, so the cell has to contain an unbroken run of letters
@@ -716,6 +722,11 @@ def _build_row(
     row.confidence = (
         round(sum(confidences) / len(confidences), 4) if confidences else None
     )
+
+    if form_layout.RECIPIENT_ID in cells:
+        row.cells[form_layout.RECIPIENT_ID] = norm.thai_id_text(
+            cells[form_layout.RECIPIENT_ID]
+        )
 
     if form_layout.BATCH_NO in cells:
         batch, certain = norm.clean_batch_no(cells[form_layout.BATCH_NO])
